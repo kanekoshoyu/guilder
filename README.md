@@ -7,8 +7,8 @@ official support: rust, python
 
 # code structure
 
-| component                      | description                                                  |
-| ------------------------------ | ------------------------------------------------------------ |
-| [trading.yaml](./trading.yaml) | definition of trading traits                                 |
-| [codegen](./trading.yaml)      | codegen for different programming lanugages, written in rust |
-| [/target](./target)            | generated trading trait code                                 |
+| component                       | description                                                  |
+| ------------------------------- | ------------------------------------------------------------ |
+| [trading.yaml](./trading.yaml)  | definition of trading traits                                 |
+| [/codegen](./codegen/README.md) | codegen for different programming lanugages, written in rust |
+| [/target](./target/README.md)   | generated trading trait code                                 |
