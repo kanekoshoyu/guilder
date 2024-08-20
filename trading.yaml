@@ -1,0 +1,51 @@
+traits:
+  - name: GetMarketData
+    methods:
+      - name: get_price
+        return_type: i32
+        args:
+          - name: x
+            type: String
+          - name: y
+            type: i32
+
+  # define below one by one
+  # - name: get_ohlcv
+  #   return_type: String
+  # - name: get_ohlcv
+  #   return_type: String
+  #   args:
+  #     - name: name
+  #       type: String
+
+  - name: OrderPlace
+    methods:
+      - name: get_price
+        return_type: i32
+        args:
+          - name: x
+            type: String
+          - name: price
+            type: i32
+          - name: volume
+            type: i32
+
+  - name: OrderChange
+    methods:
+      - name: get_price
+        return_type: i32
+        args:
+          - name: x
+            type: String
+          - name: price
+            type: i32
+          - name: volume
+            type: i32
+
+  - name: OrderCancel
+    methods:
+      - name: get_price
+        return_type: i32
+        args:
+          - name: x
+            type: String
