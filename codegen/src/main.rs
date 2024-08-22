@@ -207,8 +207,12 @@ fn codegen_str_python(config: YamlConfig) -> String {
     let language = ProgrammingLanguage::Python;
     let mut code = String::new();
 
+    // Import the necessary ABC modules at the top
+    code.push_str("from abc import ABC, abstractmethod\n\n");
+
     for tr in config.traits {
-        code.push_str(&format!("class {}:\n", tr.name));
+        // Define the class and indicate it inherits from ABC
+        code.push_str(&format!("class {}(ABC):\n", tr.name));
 
         for method in tr.methods {
             let args: Vec<String> = method
@@ -222,6 +226,8 @@ fn codegen_str_python(config: YamlConfig) -> String {
                 format!("self, {}", args.join(", "))
             };
 
+            // Add the abstractmethod decorator
+            code.push_str("    @abstractmethod\n");
             code.push_str(&format!(
                 "    def {}({}) -> {}:\n",
                 method.name,
@@ -236,6 +242,7 @@ fn codegen_str_python(config: YamlConfig) -> String {
 
     code
 }
+
 fn codegen(
     config: YamlConfig,
     language: ProgrammingLanguage,

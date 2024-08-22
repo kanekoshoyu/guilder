@@ -10,23 +10,16 @@ traits:
     methods:
       - name: get_symbol
         return_type: Vec<String>
-        args:
-          - name: x
-            type: String
-          - name: y
-            type: i32
       - name: get_price
         return_type: f64
         args:
-          - name: x
+          - name: symbol
             type: String
-          - name: y
-            type: i32
-  # TODO define get_ohlcv, 
+  # TODO define get_ohlcv,
   # first check what is the common API
   # and then see if we can map this with yaml
   # - name: get_ohlcv
-    # return_type: String # return type I assume is a little more complex
+  # return_type: String # return type I assume is a little more complex
   # - name: get_ohlcv
   #   return_type: String
   #   args:
@@ -69,4 +62,3 @@ enum:
         description: "The task has been completed."
       - name: Failed
         description: "The task has failed."
-
