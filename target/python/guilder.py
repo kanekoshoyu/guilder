@@ -1,26 +1,35 @@
-class TestServer:
+from abc import ABC, abstractmethod
+
+class TestServer(ABC):
+    @abstractmethod
     def ping(self) -> bool:
         pass
 
+    @abstractmethod
     def get_server_time(self) -> int:
         pass
 
 
-class GetMarketData:
-    def get_symbol(self, x: str, y: int) -> list[str]:
+class GetMarketData(ABC):
+    @abstractmethod
+    def get_symbol(self) -> list[str]:
         pass
 
-    def get_price(self, x: str, y: int) -> float:
+    @abstractmethod
+    def get_price(self, symbol: str) -> float:
         pass
 
 
-class ManageOrder:
+class ManageOrder(ABC):
+    @abstractmethod
     def place_order(self, x: str, price: int, volume: int) -> int:
         pass
 
+    @abstractmethod
     def change_order(self, x: str, price: int, volume: int) -> int:
         pass
 
+    @abstractmethod
     def cancel_order(self, x: str) -> int:
         pass
 

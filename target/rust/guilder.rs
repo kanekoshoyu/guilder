@@ -4,8 +4,8 @@ trait TestServer {
 }
 
 trait GetMarketData {
-    fn get_symbol(x: String, y: i32) -> Vec<String>;
-    fn get_price(x: String, y: i32) -> f64;
+    fn get_symbol() -> Vec<String>;
+    fn get_price(symbol: String) -> f64;
 }
 
 trait ManageOrder {
