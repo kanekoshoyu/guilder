@@ -1,20 +1,27 @@
+class TestServer:
+    def ping(self) -> bool:
+        pass
+
+    def get_server_time(self) -> int:
+        pass
+
+
 class GetMarketData:
-    def get_price(self, x: str, y: int) -> int:
+    def get_symbol(self, x: str, y: int) -> list[str]:
+        pass
+
+    def get_price(self, x: str, y: int) -> float:
         pass
 
 
-class OrderPlace:
-    def get_price(self, x: str, price: int, volume: int) -> int:
+class ManageOrder:
+    def place_order(self, x: str, price: int, volume: int) -> int:
         pass
 
-
-class OrderChange:
-    def get_price(self, x: str, price: int, volume: int) -> int:
+    def change_order(self, x: str, price: int, volume: int) -> int:
         pass
 
-
-class OrderCancel:
-    def get_price(self, x: str) -> int:
+    def cancel_order(self, x: str) -> int:
         pass
 
 

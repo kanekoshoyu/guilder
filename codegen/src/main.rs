@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 enum ProgrammingLanguage {
@@ -34,6 +35,8 @@ struct Trait {
 struct Method {
     name: String,
     return_type: ValueType,
+    #[serde(default)]
+    // default to empty vec when not provided
     args: Vec<Argument>,
 }
 
@@ -44,7 +47,8 @@ struct Argument {
     arg_type: ValueType,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+// TODO implement the serde for ValueType::List
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 enum ValueType {
     I8,
@@ -63,32 +67,31 @@ enum ValueType {
     Char,
     #[serde(rename = "String")]
     String,
-    Unit,  // Corresponds to ()
-    Array, // Fixed-size arrays like [i32; 3]
-    Slice, // Dynamically sized arrays like &[i32]
+    #[serde(rename = "()")]
+    Unit,
+    List(Box<ValueType>), // Represents arrays of a specific type, from Vec<T: ValueType>
 }
 impl ValueType {
-    pub fn to_string(&self, language: ProgrammingLanguage) -> &'static str {
+    pub fn to_string(&self, language: ProgrammingLanguage) -> String {
         match language {
             ProgrammingLanguage::Rust => match self {
-                Self::I8 => "i8",
-                Self::I16 => "i16",
-                Self::I32 => "i32",
-                Self::I64 => "i64",
-                Self::I128 => "i128",
-                Self::U8 => "u8",
-                Self::U16 => "u16",
-                Self::U32 => "u32",
-                Self::U64 => "u64",
-                Self::U128 => "u128",
-                Self::F32 => "f32",
-                Self::F64 => "f64",
-                Self::Bool => "bool",
-                Self::Char => "char",
-                Self::String => "String",
-                Self::Unit => "unit",
-                Self::Array => "array",
-                Self::Slice => "slice",
+                Self::I8 => "i8".into(),
+                Self::I16 => "i16".into(),
+                Self::I32 => "i32".into(),
+                Self::I64 => "i64".into(),
+                Self::I128 => "i128".into(),
+                Self::U8 => "u8".into(),
+                Self::U16 => "u16".into(),
+                Self::U32 => "u32".into(),
+                Self::U64 => "u64".into(),
+                Self::U128 => "u128".into(),
+                Self::F32 => "f32".into(),
+                Self::F64 => "f64".into(),
+                Self::Bool => "bool".into(),
+                Self::Char => "char".into(),
+                Self::String => "String".into(),
+                Self::Unit => "unit".into(),
+                Self::List(x) => format!("Vec<{}>", x.to_string(ProgrammingLanguage::Rust)),
             },
             ProgrammingLanguage::Python => match self {
                 Self::I8
@@ -100,13 +103,67 @@ impl ValueType {
                 | Self::U16
                 | Self::U32
                 | Self::U64
-                | Self::U128 => "int",
-                Self::F32 | Self::F64 => "float",
-                Self::Bool => "bool",
-                Self::Char | Self::String => "str", // Python doesn't have a single-character type, so `str` is used
-                Self::Unit => "None",               // Python equivalent of Rust's unit type ()
-                Self::Array | Self::Slice => "list", // Python lists correspond to Rust arrays and slices
+                | Self::U128 => "int".into(),
+                Self::F32 | Self::F64 => "float".into(),
+                Self::Bool => "bool".into(),
+                Self::Char | Self::String => "str".into(), // Python has no single-character type, so `str` is used
+                Self::Unit => "None".to_string(), // Python equivalent of Rust's unit type ()
+                Self::List(x) => format!("list[{}]", x.to_string(ProgrammingLanguage::Python)),
             },
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ValueType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ValueTypeVisitor;
+
+        impl<'de> de::Visitor<'de> for ValueTypeVisitor {
+            type Value = ValueType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string representing a Rust type, like Vec<i64>")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<ValueType, E>
+            where
+                E: de::Error,
+            {
+                parse_value_type(value).map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_str(ValueTypeVisitor)
+    }
+}
+
+fn parse_value_type(value: &str) -> Result<ValueType, String> {
+    if value.starts_with("Vec<") && value.ends_with('>') {
+        let inner_type_str = &value[4..value.len() - 1];
+        let inner_type = parse_value_type(inner_type_str)?;
+        Ok(ValueType::List(Box::new(inner_type)))
+    } else {
+        match value {
+            "i8" => Ok(ValueType::I8),
+            "i16" => Ok(ValueType::I16),
+            "i32" => Ok(ValueType::I32),
+            "i64" => Ok(ValueType::I64),
+            "i128" => Ok(ValueType::I128),
+            "u8" => Ok(ValueType::U8),
+            "u16" => Ok(ValueType::U16),
+            "u32" => Ok(ValueType::U32),
+            "u64" => Ok(ValueType::U64),
+            "u128" => Ok(ValueType::U128),
+            "f32" => Ok(ValueType::F32),
+            "f64" => Ok(ValueType::F64),
+            "bool" => Ok(ValueType::Bool),
+            "char" => Ok(ValueType::Char),
+            "String" => Ok(ValueType::String),
+            "()" => Ok(ValueType::Unit),
+            _ => Err(format!("Unsupported type: {}", value)),
         }
     }
 }
@@ -159,10 +216,14 @@ fn codegen_str_python(config: YamlConfig) -> String {
                 .iter()
                 .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language)))
                 .collect();
-            let args_str = args.join(", ");
+            let args_str = if args.is_empty() {
+                "self".to_string()
+            } else {
+                format!("self, {}", args.join(", "))
+            };
 
             code.push_str(&format!(
-                "    def {}(self, {}) -> {}:\n",
+                "    def {}({}) -> {}:\n",
                 method.name,
                 args_str,
                 method.return_type.to_string(language)
@@ -175,7 +236,6 @@ fn codegen_str_python(config: YamlConfig) -> String {
 
     code
 }
-
 fn codegen(
     config: YamlConfig,
     language: ProgrammingLanguage,
@@ -205,10 +265,10 @@ fn codegen(
 }
 
 fn main() {
-    let config = parse_yaml("../trading.yaml"); // Make sure to have the yaml file at the correct path
+    let config = parse_yaml("../trading.yaml");
     let output_path = "../target";
-    // let languages = [ProgrammingLanguage::Rust, ProgrammingLanguage::Python];
-    let languages = [ProgrammingLanguage::Python];
+    let languages = [ProgrammingLanguage::Rust, ProgrammingLanguage::Python];
+    // let languages = [ProgrammingLanguage::Python];
     for language in languages {
         if let Err(e) = codegen(config.clone(), language, output_path) {
             println!("error: {e}");

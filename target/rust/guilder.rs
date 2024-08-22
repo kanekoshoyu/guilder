@@ -1,16 +1,16 @@
+trait TestServer {
+    fn ping() -> bool;
+    fn get_server_time() -> i64;
+}
+
 trait GetMarketData {
-    fn get_price(x: String, y: i32) -> i32;
+    fn get_symbol(x: String, y: i32) -> Vec<String>;
+    fn get_price(x: String, y: i32) -> f64;
 }
 
-trait OrderPlace {
-    fn get_price(x: String, price: i32, volume: i32) -> i32;
-}
-
-trait OrderChange {
-    fn get_price(x: String, price: i32, volume: i32) -> i32;
-}
-
-trait OrderCancel {
-    fn get_price(x: String) -> i32;
+trait ManageOrder {
+    fn place_order(x: String, price: i32, volume: i32) -> i32;
+    fn change_order(x: String, price: i32, volume: i32) -> i32;
+    fn cancel_order(x: String) -> i32;
 }
 

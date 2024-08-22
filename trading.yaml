@@ -1,26 +1,40 @@
 traits:
+  - name: TestServer
+    methods:
+      - name: ping
+        return_type: bool
+      - name: get_server_time
+        return_type: i64
+
   - name: GetMarketData
     methods:
-      - name: get_price
-        return_type: i32
+      - name: get_symbol
+        return_type: Vec<String>
         args:
           - name: x
             type: String
           - name: y
             type: i32
-
-  # define below one by one
+      - name: get_price
+        return_type: f64
+        args:
+          - name: x
+            type: String
+          - name: y
+            type: i32
+  # TODO define get_ohlcv, 
+  # first check what is the common API
+  # and then see if we can map this with yaml
   # - name: get_ohlcv
-  #   return_type: String
+    # return_type: String # return type I assume is a little more complex
   # - name: get_ohlcv
   #   return_type: String
   #   args:
   #     - name: name
-  #       type: String
 
-  - name: OrderPlace
+  - name: ManageOrder
     methods:
-      - name: get_price
+      - name: place_order
         return_type: i32
         args:
           - name: x
@@ -29,10 +43,7 @@ traits:
             type: i32
           - name: volume
             type: i32
-
-  - name: OrderChange
-    methods:
-      - name: get_price
+      - name: change_order
         return_type: i32
         args:
           - name: x
@@ -41,11 +52,21 @@ traits:
             type: i32
           - name: volume
             type: i32
-
-  - name: OrderCancel
-    methods:
-      - name: get_price
+      - name: cancel_order
         return_type: i32
         args:
           - name: x
             type: String
+
+enum:
+  - name: Status
+    values:
+      - name: Success
+        description: "The task is pending."
+      - name: InProgress
+        description: "The task is currently in progress."
+      - name: Completed
+        description: "The task has been completed."
+      - name: Failed
+        description: "The task has failed."
+
