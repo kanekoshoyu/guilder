@@ -1,5 +1,5 @@
 use serde::{de, Deserialize, Deserializer, Serialize};
-use std::fmt;
+use std::fmt::{self, format};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 enum ProgrammingLanguage {
@@ -252,12 +252,20 @@ fn codegen(
         ProgrammingLanguage::Rust => codegen_str_rust(config),
         ProgrammingLanguage::Python => codegen_str_python(config),
     };
-    let output_path = format!(
-        "{}/{}/guilder.{}",
-        output_path.as_ref().display(),
-        language.alias(),
-        language.file_extension()
-    );
+    let output_path = match language {
+        ProgrammingLanguage::Rust => format!(
+            "{}/{}/src/guilder_abstraction.{}",
+            output_path.as_ref().display(),
+            language.alias(),
+            language.file_extension()
+        ),
+        ProgrammingLanguage::Python => format!(
+            "{}/{}/guilder_abstraction.{}",
+            output_path.as_ref().display(),
+            language.alias(),
+            language.file_extension()
+        ),
+    };
 
     let output_path = std::path::Path::new(&output_path);
     if let Some(parent) = output_path.parent() {
