@@ -12,7 +12,7 @@ official support: rust, python
 | [target](./target/README.md)   | generated trading trait code                                          |
 
 ## TODO
-- [ ] package rust 
-- [ ] publish rust 
-- [ ] package python 
-- [ ] publish python
+- [ ] package rust abstraction
+- [ ] publish rust abstraction
+- [ ] package python abstraction
+- [ ] publish python abstraction
