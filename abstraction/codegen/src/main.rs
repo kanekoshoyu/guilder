@@ -1,5 +1,5 @@
 use serde::{de, Deserialize, Deserializer, Serialize};
-use std::fmt::{self, format};
+use std::fmt::{self};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 enum ProgrammingLanguage {
@@ -218,16 +218,14 @@ fn codegen_str_python(config: YamlConfig) -> String {
         code.push_str(&format!("class {}(ABC):\n", tr.name));
 
         for method in tr.methods {
-            let args: Vec<String> = method
-                .args
-                .iter()
-                .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language)))
-                .collect();
-            let args_str = if args.is_empty() {
-                "self".to_string()
-            } else {
-                format!("self, {}", args.join(", "))
-            };
+            let mut args: Vec<String> = vec!["self".to_string()]; // Add &self as the first argument
+            args.extend(
+                method
+                    .args
+                    .iter()
+                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language))),
+            );
+            let args_str = args.join(", ");
 
             // Add the abstractmethod decorator
             code.push_str("    @abstractmethod\n");
