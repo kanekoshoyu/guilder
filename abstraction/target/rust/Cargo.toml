@@ -2,6 +2,7 @@
 name = "guilder-abstraction"
 version = "0.1.0"
 edition = "2021"
+description = "multi-exchange crypto trading trait"
 
 [lib]
 

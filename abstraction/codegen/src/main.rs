@@ -179,7 +179,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     let mut code = String::new();
 
     for tr in config.traits {
-        code.push_str(&format!("trait {} {{\n", tr.name));
+        code.push_str(&format!("pub trait {} {{\n", tr.name));
 
         for method in tr.methods {
             let args: Vec<String> = method
