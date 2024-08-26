@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to both codegen and trading.yaml will be documented in this file.
 
+## [0.1.2] - 2024-08-26
+### Added
+- support description
+- 
 ## [0.1.1] - 2024-08-21
 ### Added
 - support to list

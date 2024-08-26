@@ -1,16 +1,28 @@
+/// test server network connection
 pub trait TestServer {
-    fn ping(&self) -> bool;
-    fn get_server_time(&self) -> i64;
+	/// test ping
+	fn ping(&self) -> bool;
+	/// get server local time
+	fn get_server_time(&self) -> i64;
 }
 
+/// get market data such as symbol, price and volume
 pub trait GetMarketData {
-    fn get_symbol(&self) -> Vec<String>;
-    fn get_price(&self, symbol: String) -> f64;
+	/// get symbol, such as BTC-USD
+	fn get_symbol(&self) -> Vec<String>;
+	/// get price if a symbol (e.g. BTC-USD -> 67000.0)
+	fn get_price(&self, symbol: String) -> f64;
 }
 
+/// place, change, cancel order
 pub trait ManageOrder {
-    fn place_order(&self, x: String, price: i32, volume: i32) -> i32;
-    fn change_order(&self, x: String, price: i32, volume: i32) -> i32;
-    fn cancel_order(&self, x: String) -> i32;
+	/// place order, return cloid
+	fn place_order(&self, symbol: String, price: i32, volume: i32) -> i64;
+	/// change order
+	fn change_order_by_cloid(&self, cloid: i64, price: i32, volume: i32) -> i64;
+	/// cancel order by cloid
+	fn cancel_order(&self, cloid: i64) -> i64;
+	/// cancel all order regardless of cloid/symbol
+	fn cancel_all_order(&self) -> bool;
 }
 

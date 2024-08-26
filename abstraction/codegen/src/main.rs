@@ -20,6 +20,7 @@ impl ProgrammingLanguage {
         }
     }
 }
+
 #[derive(Deserialize, Debug, Clone)]
 struct YamlConfig {
     traits: Vec<Trait>,
@@ -28,12 +29,14 @@ struct YamlConfig {
 #[derive(Deserialize, Debug, Clone)]
 struct Trait {
     name: String,
+    description: Option<String>,
     methods: Vec<Method>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 struct Method {
     name: String,
+    description: Option<String>,
     return_type: ValueType,
     #[serde(default)]
     // default to empty vec when not provided
@@ -179,6 +182,9 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     let mut code = String::new();
 
     for tr in config.traits {
+        if let Some(description) = tr.description {
+            code.push_str(&format!("/// {}\n", description));
+        }
         code.push_str(&format!("pub trait {} {{\n", tr.name));
 
         for method in tr.methods {
@@ -192,8 +198,11 @@ fn codegen_str_rust(config: YamlConfig) -> String {
             );
             let args_str = args.join(", ");
 
+            if let Some(description) = method.description {
+                code.push_str(&format!("\t/// {}\n", description));
+            }
             code.push_str(&format!(
-                "    fn {}({}) -> {};\n",
+                "\tfn {}({}) -> {};\n",
                 method.name,
                 args_str,
                 method.return_type.to_string(language)
@@ -214,6 +223,9 @@ fn codegen_str_python(config: YamlConfig) -> String {
     code.push_str("from abc import ABC, abstractmethod\n\n");
 
     for tr in config.traits {
+        if let Some(description) = tr.description {
+            code.push_str(&format!("\"\"\"{}\"\"\"\n", description));
+        }
         // Define the class and indicate it inherits from ABC
         code.push_str(&format!("class {}(ABC):\n", tr.name));
 
@@ -227,15 +239,18 @@ fn codegen_str_python(config: YamlConfig) -> String {
             );
             let args_str = args.join(", ");
 
+            if let Some(description) = method.description {
+                code.push_str(&format!("\t\"\"\"{}\"\"\"\n", description));
+            }
             // Add the abstractmethod decorator
-            code.push_str("    @abstractmethod\n");
+            code.push_str("\t@abstractmethod\n");
             code.push_str(&format!(
-                "    def {}({}) -> {}:\n",
+                "\tdef {}({}) -> {}:\n",
                 method.name,
                 args_str,
                 method.return_type.to_string(language)
             ));
-            code.push_str("        pass\n\n");
+            code.push_str("\t\tpass\n\n");
         }
 
         code.push_str("\n");

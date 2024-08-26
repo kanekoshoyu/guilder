@@ -1,5 +1,6 @@
 traits:
-  - name: TestServer
+  - name: TestServerConnection
+    description: test server network connection
     methods:
       - name: ping
         return_type: bool
@@ -7,6 +8,7 @@ traits:
         return_type: i64
 
   - name: GetMarketData
+    description: get market data such as price and volume
     methods:
       - name: get_symbol
         return_type: Vec<String>
@@ -24,6 +26,12 @@ traits:
   #   return_type: String
   #   args:
   #     - name: name
+
+  - name: GetUserData
+    description: get user data such as available fund
+    methods:
+      - name: get_symbol
+        return_type: Vec<String>
 
   - name: ManageOrder
     methods:

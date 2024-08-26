@@ -1,16 +1,22 @@
 traits:
   - name: TestServer
+    description: test server network connection
     methods:
       - name: ping
+        description: test ping
         return_type: bool
       - name: get_server_time
+        description: get server local time
         return_type: i64
 
   - name: GetMarketData
+    description: get market data such as symbol, price and volume
     methods:
       - name: get_symbol
+        description: get symbol, such as BTC-USD
         return_type: Vec<String>
       - name: get_price
+        description: get price if a symbol (e.g. BTC-USD -> 67000.0)
         return_type: f64
         args:
           - name: symbol
@@ -26,30 +32,37 @@ traits:
   #     - name: name
 
   - name: ManageOrder
+    description: place, change, cancel order
     methods:
       - name: place_order
-        return_type: i32
+        description: place order, return cloid
         args:
-          - name: x
+          - name: symbol
             type: String
           - name: price
             type: i32
           - name: volume
             type: i32
-      - name: change_order
-        return_type: i32
+        return_type: i64
+      - name: change_order_by_cloid
+        description: change order
         args:
-          - name: x
-            type: String
+          - name: cloid
+            type: i64
           - name: price
             type: i32
           - name: volume
             type: i32
+        return_type: i64
       - name: cancel_order
-        return_type: i32
+        description: cancel order by cloid
         args:
-          - name: x
-            type: String
+          - name: cloid
+            type: i64
+        return_type: i64
+      - name: cancel_all_order
+        description: cancel all order regardless of cloid/symbol
+        return_type: bool
 
 enum:
   - name: Status
