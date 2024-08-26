@@ -16,11 +16,12 @@ traits:
         description: get symbol, such as BTC-USD
         return_type: Vec<String>
       - name: get_price
-        description: get price if a symbol (e.g. BTC-USD -> 67000.0)
+        description: get mid-price of a symbol (e.g. BTC-USD -> 67000.0)
         return_type: f64
         args:
           - name: symbol
             type: String
+      
   # TODO define get_ohlcv,
   # first check what is the common API
   # and then see if we can map this with yaml

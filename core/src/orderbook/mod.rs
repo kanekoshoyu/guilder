@@ -1,4 +1,4 @@
-// use guilder_abstraction::GetMarketData;
+use guilder_abstraction::GetMarketData;
 use std::collections::HashMap;
 
 pub struct Orderbook {
@@ -13,7 +13,10 @@ impl Orderbook {
         }
     }
 
-    // pub fn init(impl GerMarketData) -> Self {
-    //     let orderbook = Orderbook::new();
-    // }
+    pub fn init(client: impl GetMarketData) -> Self {
+        let orderbook = Orderbook::new();
+        // TODO fill in the data, shall we use the orderbook API?
+        // client.get_price(symbol);
+        orderbook
+    }
 }
