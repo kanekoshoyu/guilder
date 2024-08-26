@@ -1,15 +1,16 @@
 pub trait TestServer {
-    fn ping() -> bool;
-    fn get_server_time() -> i64;
+    fn ping(&self) -> bool;
+    fn get_server_time(&self) -> i64;
 }
 
 pub trait GetMarketData {
-    fn get_symbol() -> Vec<String>;
-    fn get_price(symbol: String) -> f64;
+    fn get_symbol(&self) -> Vec<String>;
+    fn get_price(&self, symbol: String) -> f64;
 }
 
 pub trait ManageOrder {
-    fn place_order(x: String, price: i32, volume: i32) -> i32;
-    fn change_order(x: String, price: i32, volume: i32) -> i32;
-    fn cancel_order(x: String) -> i32;
+    fn place_order(&self, x: String, price: i32, volume: i32) -> i32;
+    fn change_order(&self, x: String, price: i32, volume: i32) -> i32;
+    fn cancel_order(&self, x: String) -> i32;
 }
+

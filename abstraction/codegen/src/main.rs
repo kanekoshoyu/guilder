@@ -182,11 +182,14 @@ fn codegen_str_rust(config: YamlConfig) -> String {
         code.push_str(&format!("pub trait {} {{\n", tr.name));
 
         for method in tr.methods {
-            let args: Vec<String> = method
-                .args
-                .iter()
-                .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language)))
-                .collect();
+            // Create the arguments list with &self included
+            let mut args: Vec<String> = vec!["&self".to_string()]; // Add &self as the first argument
+            args.extend(
+                method
+                    .args
+                    .iter()
+                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language))),
+            );
             let args_str = args.join(", ");
 
             code.push_str(&format!(
