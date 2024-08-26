@@ -219,6 +219,8 @@ checksum = "40ecd4077b5ae9fd2e9e169b102c6c330d0605168eb0e8bf79952b256dbefffd"
 [[package]]
 name = "guilder-abstraction"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15551e75f1b4af34d4c204b000bfd65e3668ea2be3bc3be996a00744ddd36786"
 
 [[package]]
 name = "guilder-client-binance"

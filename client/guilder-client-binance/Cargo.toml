@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 reqwest = "0.12.7"
-guilder-abstraction = { path = "../../abstraction/target/rust" }
+guilder-abstraction = "0.1.0"
