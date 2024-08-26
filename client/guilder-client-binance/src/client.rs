@@ -7,18 +7,18 @@ pub struct BinanceClient {
     client: Client,
 }
 impl BinanceClient {
-    fn new() -> Self {
+    pub fn new() -> Self {
         BinanceClient {
             client: Client::new(),
         }
     }
 }
 impl guilder_abstraction::GetMarketData for BinanceClient {
-    fn get_symbol() -> Vec<String> {
+    fn get_symbol(&self) -> Vec<String> {
         todo!()
     }
 
-    fn get_price(symbol: String) -> f64 {
+    fn get_price(&self, symbol: String) -> f64 {
         todo!()
     }
 }
@@ -31,6 +31,6 @@ mod tests {
     fn test_get_market_data() {
         use guilder_abstraction::GetMarketData;
         let client = BinanceClient::new();
-        client.get_symbol();
+        assert!(client.get_symbol().len() > 0);
     }
 }
