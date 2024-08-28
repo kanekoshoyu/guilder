@@ -220,6 +220,9 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     let language = ProgrammingLanguage::Rust;
     let mut code = String::new();
 
+    // dependencies
+    code.push_str("use std::collections::HashMap;\n\n");
+
     for tr in config.traits {
         if let Some(description) = tr.description {
             code.push_str(&format!("/// {}\n", description));
@@ -262,12 +265,11 @@ fn codegen_str_python(config: YamlConfig) -> String {
     code.push_str("from abc import ABC, abstractmethod\n\n");
 
     for tr in config.traits {
-        if let Some(description) = tr.description {
-            code.push_str(&format!("\"\"\"{}\"\"\"\n", description));
-        }
         // Define the class and indicate it inherits from ABC
         code.push_str(&format!("class {}(ABC):\n", tr.name));
-
+        if let Some(description) = tr.description {
+            code.push_str(&format!("\t\"\"\"{}\"\"\"\n", description));
+        }
         for method in tr.methods {
             let mut args: Vec<String> = vec!["self".to_string()]; // Add &self as the first argument
             args.extend(
@@ -278,9 +280,6 @@ fn codegen_str_python(config: YamlConfig) -> String {
             );
             let args_str = args.join(", ");
 
-            if let Some(description) = method.description {
-                code.push_str(&format!("\t\"\"\"{}\"\"\"\n", description));
-            }
             // Add the abstractmethod decorator
             code.push_str("\t@abstractmethod\n");
             code.push_str(&format!(
@@ -289,6 +288,9 @@ fn codegen_str_python(config: YamlConfig) -> String {
                 args_str,
                 method.return_type.to_string(language)
             ));
+            if let Some(description) = method.description {
+                code.push_str(&format!("\t\t\"\"\"{}\"\"\"\n", description));
+            }
             code.push_str("\t\tpass\n\n");
         }
 

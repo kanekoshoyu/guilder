@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// test server network connection
 pub trait TestServer {
 	/// test ping

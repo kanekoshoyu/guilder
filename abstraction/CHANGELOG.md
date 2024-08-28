@@ -5,6 +5,8 @@ All notable changes to both codegen and trading.yaml will be documented in this 
 ### Added
 - support description
 - support map
+### Fixed
+- python docstring position
 
 ## [0.1.1] - 2024-08-21
 ### Added
