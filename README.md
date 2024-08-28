@@ -22,10 +22,14 @@ an unopinionated multi-language, cross-exchange crypto trading library
 
 ## guidelines to maintain unopinionated code
 - sync as default, async as feature.
-- abstraction only use standard libraries.
-- abstraction only use traits and primitive data type (no custom structs).
+- abstraction definition (trading.yaml) only use 
+  - traits
+  - primitive data type in Rust format, no external struct
+  - custom primitive enum defined in yaml, most languages doesn't support struct within enum
+  - custom struct defined in yaml using either primitives or enum, no nesting
+- generated abstraction code only use standard libraries.
 - core only use standard and networking libraries in default. 
-- any variants (e.g. dashmap, tokio) should be defined with feature.
+- any variants (e.g. dashmap, tokio, string-intern) should be defined with feature.
 
 ## why the name?
 **Dutch Guilder** was the currency used for 500+ years across the East India Company era for trading. I hope guilder trading library will be used by a lot of people for years. It also rhymes with **builder**.

@@ -23,11 +23,11 @@ traits:
             type: String
       - name: get_orderbook
         description: get orderbook
-        return_type: HashMap<f64, f64>
+        return_type: Orderbook
         args:
           - name: symbol
             type: String
-      
+
   # TODO define get_ohlcv,
   # first check what is the common API
   # and then see if we can map this with yaml
@@ -71,6 +71,7 @@ traits:
         description: cancel all order regardless of cloid/symbol
         return_type: bool
 
+# enum: keep it primitive
 enum:
   - name: Status
     values:
@@ -82,3 +83,12 @@ enum:
         description: "The task has been completed."
       - name: Failed
         description: "The task has failed."
+
+# struct: either primitive or enum
+struct:
+  - name: Orderbook
+    values:
+      - name: asks
+        type: HashMap<f64, f64>
+      - name: bids
+        type: HashMap<f64, f64>
