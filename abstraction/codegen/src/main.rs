@@ -24,30 +24,46 @@ impl ProgrammingLanguage {
 #[derive(Deserialize, Debug, Clone)]
 struct YamlConfig {
     traits: Vec<Trait>,
+    structs: Vec<Struct>,
+    // enums: Vec<Enums>
 }
 
 #[derive(Deserialize, Debug, Clone)]
 struct Trait {
     name: String,
     description: Option<String>,
-    methods: Vec<Method>,
+    methods: Vec<TraitMethod>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
-struct Method {
+struct TraitMethod {
     name: String,
     description: Option<String>,
     return_type: ValueType,
     #[serde(default)]
     // default to empty vec when not provided
-    args: Vec<Argument>,
+    args: Vec<TraitMethodArgument>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
-struct Argument {
+struct TraitMethodArgument {
     name: String,
     #[serde(rename = "type")]
     arg_type: ValueType,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct Struct {
+    name: String,
+    description: String,
+    values: Vec<StructValue>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct StructValue {
+    name: String,
+    #[serde(rename = "type")]
+    value_type: ValueType,
 }
 
 // TODO implement the serde for ValueType::List
@@ -79,6 +95,8 @@ enum ValueType {
         key_type: Box<ValueType>,
         value_type: Box<ValueType>,
     },
+    // types that are defined in the yaml itself, and should be printed directly in outcome
+    CustomType(String),
 }
 impl ValueType {
     pub fn to_string(&self, language: ProgrammingLanguage) -> String {
@@ -113,6 +131,7 @@ impl ValueType {
                         value_type.to_string(ProgrammingLanguage::Rust)
                     )
                 }
+                Self::CustomType(type_str) => type_str.clone(),
             },
             ProgrammingLanguage::Python => match self {
                 Self::I8
@@ -129,7 +148,9 @@ impl ValueType {
                 Self::Bool => "bool".into(),
                 Self::Char | Self::String => "str".into(), // Python has no single-character type, so `str` is used
                 Self::Unit => "None".to_string(), // Python equivalent of Rust's unit type ()
-                Self::List(x) => format!("list[{}]", x.to_string(ProgrammingLanguage::Python)),
+                Self::List(item_type) => {
+                    format!("list[{}]", item_type.to_string(ProgrammingLanguage::Python))
+                }
                 Self::Map {
                     key_type,
                     value_type,
@@ -140,6 +161,7 @@ impl ValueType {
                         value_type.to_string(ProgrammingLanguage::Python)
                     )
                 }
+                Self::CustomType(type_str) => type_str.clone(),
             },
         }
     }
@@ -205,7 +227,7 @@ fn parse_value_type(value: &str) -> Result<ValueType, String> {
             "char" => Ok(ValueType::Char),
             "String" => Ok(ValueType::String),
             "()" => Ok(ValueType::Unit),
-            _ => Err(format!("Unsupported type: {}", value)),
+            type_str => Ok(ValueType::CustomType(type_str.to_string())),
         }
     }
 }
@@ -223,6 +245,23 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     // dependencies
     code.push_str("use std::collections::HashMap;\n\n");
 
+    // structs
+    for st in config.structs {
+        code.push_str(&format!("/// {}\n", st.description));
+        code.push_str(&format!("pub struct {} {{\n", st.name));
+
+        for value in st.values {
+            code.push_str(&format!(
+                "\tpub {}: {},\n",
+                value.name,
+                value.value_type.to_string(ProgrammingLanguage::Rust)
+            ));
+        }
+
+        code.push_str("}\n\n");
+    }
+
+    // traits
     for tr in config.traits {
         if let Some(description) = tr.description {
             code.push_str(&format!("/// {}\n", description));
@@ -264,6 +303,28 @@ fn codegen_str_python(config: YamlConfig) -> String {
     // Import the necessary ABC modules at the top
     code.push_str("from abc import ABC, abstractmethod\n\n");
 
+    // structs
+    for st in config.structs {
+        code.push_str(&format!("class {}:\n", st.name));
+        code.push_str(&format!("\t\"\"\"{}\"\"\"\n", st.description));
+        code.push_str("\tdef __init__(self");
+        let mut field_definitions = String::new();
+        let mut init_body = String::new();
+        for field in st.values {
+            field_definitions.push_str(&format!(
+                ", {}: {}",
+                field.name,
+                field.value_type.to_string(ProgrammingLanguage::Python)
+            ));
+            init_body.push_str(&format!("\t\tself.{} = {}\n", field.name, field.name));
+        }
+
+        code.push_str(&format!("{}):\n", field_definitions));
+        code.push_str(&init_body);
+        code.push_str("\n");
+    }
+
+    // traits
     for tr in config.traits {
         // Define the class and indicate it inherits from ABC
         code.push_str(&format!("class {}(ABC):\n", tr.name));

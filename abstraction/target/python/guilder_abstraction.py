@@ -1,5 +1,11 @@
 from abc import ABC, abstractmethod
 
+class Orderbook:
+	"""order book, with asks and bids (key: price, value: volume)"""
+	def __init__(self, asks: dict[float, float], bids: dict[float, float]):
+		self.asks = asks
+		self.bids = bids
+
 class TestServer(ABC):
 	"""test server network connection"""
 	@abstractmethod
@@ -26,7 +32,7 @@ class GetMarketData(ABC):
 		pass
 
 	@abstractmethod
-	def get_orderbook(self, symbol: str) -> dict[float, float]:
+	def get_orderbook(self, symbol: str) -> Orderbook:
 		"""get orderbook"""
 		pass
 

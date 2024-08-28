@@ -21,6 +21,10 @@ impl guilder_abstraction::GetMarketData for BinanceClient {
     fn get_price(&self, symbol: String) -> f64 {
         todo!()
     }
+    
+    fn get_orderbook(&self, symbol: String) -> std::collections::HashMap<f64, f64> {
+        todo!()
+    }
 }
 
 #[cfg(test)]

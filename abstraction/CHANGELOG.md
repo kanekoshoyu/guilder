@@ -1,5 +1,8 @@
 # Changelog
 All notable changes to both codegen and trading.yaml will be documented in this file.
+## [0.1.3] - 2024-08-28
+### Added
+- support custom struct in yaml
 
 ## [0.1.2] - 2024-08-26
 ### Added

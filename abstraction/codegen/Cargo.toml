@@ -1,6 +1,6 @@
 [package]
-name = "guilder-abtraction-codegen"
-version = "0.1.2"
+name = "guilder-abstraction-codegen"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]

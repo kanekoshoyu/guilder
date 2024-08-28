@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+/// order book, with asks and bids (key: price, value: volume)
+pub struct Orderbook {
+	pub asks: HashMap<f64, f64>,
+	pub bids: HashMap<f64, f64>,
+}
+
 /// test server network connection
 pub trait TestServer {
 	/// test ping
@@ -15,7 +21,7 @@ pub trait GetMarketData {
 	/// get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
 	fn get_price(&self, symbol: String) -> f64;
 	/// get orderbook
-	fn get_orderbook(&self, symbol: String) -> HashMap<f64, f64>;
+	fn get_orderbook(&self, symbol: String) -> Orderbook;
 }
 
 /// place, change, cancel order
