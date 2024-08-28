@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-reqwest = "0.12.7"
-guilder-abstraction = "0.1.0"
+# development: path, deployment: version
+guilder-abstraction = { path = "../../abstraction/target/rust", version = "0.1.0" }
+reqwest.workspace = true

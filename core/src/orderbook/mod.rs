@@ -1,6 +1,8 @@
-use guilder_abstraction::GetMarketData;
 use std::collections::HashMap;
+use guilder_abstraction::GetMarketData;
 
+// TODO: decide whether to use f64 or decimal
+// TODO: decide whether to use dashmap or hashma
 pub struct Orderbook {
     ask: HashMap<f64, f64>,
     bid: HashMap<f64, f64>,
