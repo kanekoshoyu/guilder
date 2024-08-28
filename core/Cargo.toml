@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 # development: path, deployment: version
 guilder-abstraction = { path = "../abstraction/target/rust", version = "0.1.1" }
+ordered-float.workspace = true
