@@ -13,11 +13,17 @@ traits:
     description: get market data such as symbol, price and volume
     methods:
       - name: get_symbol
-        description: get symbol, such as BTC-USD
+        description: get symbol, such as BTCUSD
         return_type: Vec<String>
       - name: get_price
-        description: get mid-price of a symbol (e.g. BTC-USD -> 67000.0)
+        description: get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
         return_type: f64
+        args:
+          - name: symbol
+            type: String
+      - name: get_orderbook
+        description: get orderbook
+        return_type: HashMap<f64, f64>
         args:
           - name: symbol
             type: String

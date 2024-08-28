@@ -72,7 +72,13 @@ enum ValueType {
     String,
     #[serde(rename = "()")]
     Unit,
-    List(Box<ValueType>), // Represents arrays of a specific type, from Vec<T: ValueType>
+    // Represents arrays of a specific type, from Vec<T: ValueType>
+    List(Box<ValueType>),
+    // Represents arrays of a specific type, from HashMap<T: ValueType, U: ValueType>
+    Map {
+        key_type: Box<ValueType>,
+        value_type: Box<ValueType>,
+    },
 }
 impl ValueType {
     pub fn to_string(&self, language: ProgrammingLanguage) -> String {
@@ -94,7 +100,19 @@ impl ValueType {
                 Self::Char => "char".into(),
                 Self::String => "String".into(),
                 Self::Unit => "unit".into(),
-                Self::List(x) => format!("Vec<{}>", x.to_string(ProgrammingLanguage::Rust)),
+                Self::List(item_type) => {
+                    format!("Vec<{}>", item_type.to_string(ProgrammingLanguage::Rust))
+                }
+                Self::Map {
+                    key_type,
+                    value_type,
+                } => {
+                    format!(
+                        "HashMap<{}, {}>",
+                        key_type.to_string(ProgrammingLanguage::Rust),
+                        value_type.to_string(ProgrammingLanguage::Rust)
+                    )
+                }
             },
             ProgrammingLanguage::Python => match self {
                 Self::I8
@@ -112,6 +130,16 @@ impl ValueType {
                 Self::Char | Self::String => "str".into(), // Python has no single-character type, so `str` is used
                 Self::Unit => "None".to_string(), // Python equivalent of Rust's unit type ()
                 Self::List(x) => format!("list[{}]", x.to_string(ProgrammingLanguage::Python)),
+                Self::Map {
+                    key_type,
+                    value_type,
+                } => {
+                    format!(
+                        "dict[{}, {}]",
+                        key_type.to_string(ProgrammingLanguage::Python),
+                        value_type.to_string(ProgrammingLanguage::Python)
+                    )
+                }
             },
         }
     }
@@ -144,10 +172,21 @@ impl<'de> Deserialize<'de> for ValueType {
 }
 
 fn parse_value_type(value: &str) -> Result<ValueType, String> {
+    // TODO make this neater with the user of match
     if value.starts_with("Vec<") && value.ends_with('>') {
         let inner_type_str = &value[4..value.len() - 1];
         let inner_type = parse_value_type(inner_type_str)?;
         Ok(ValueType::List(Box::new(inner_type)))
+    } else if value.starts_with("HashMap<") && value.ends_with('>') && value.contains(',') {
+        let comma_pos = value.find(',').unwrap();
+        let key_type_str = &value[8..comma_pos];
+        let value_type_str = &value[comma_pos + 2..value.len() - 1];
+        let key_type = parse_value_type(key_type_str)?;
+        let value_type = parse_value_type(value_type_str)?;
+        Ok(ValueType::Map {
+            key_type: Box::new(key_type),
+            value_type: Box::new(value_type),
+        })
     } else {
         match value {
             "i8" => Ok(ValueType::I8),

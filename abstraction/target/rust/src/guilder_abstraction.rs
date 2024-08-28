@@ -8,10 +8,12 @@ pub trait TestServer {
 
 /// get market data such as symbol, price and volume
 pub trait GetMarketData {
-	/// get symbol, such as BTC-USD
+	/// get symbol, such as BTCUSD
 	fn get_symbol(&self) -> Vec<String>;
-	/// get price if a symbol (e.g. BTC-USD -> 67000.0)
+	/// get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
 	fn get_price(&self, symbol: String) -> f64;
+	/// get orderbook
+	fn get_orderbook(&self, symbol: String) -> HashMap<f64, f64>;
 }
 
 /// place, change, cancel order

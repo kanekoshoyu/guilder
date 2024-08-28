@@ -15,14 +15,19 @@ class TestServer(ABC):
 
 """get market data such as symbol, price and volume"""
 class GetMarketData(ABC):
-	"""get symbol, such as BTC-USD"""
+	"""get symbol, such as BTCUSD"""
 	@abstractmethod
 	def get_symbol(self) -> list[str]:
 		pass
 
-	"""get price if a symbol (e.g. BTC-USD -> 67000.0)"""
+	"""get mid-price of a symbol (e.g. BTCUSD -> 67000.0)"""
 	@abstractmethod
 	def get_price(self, symbol: str) -> float:
+		pass
+
+	"""get orderbook"""
+	@abstractmethod
+	def get_orderbook(self, symbol: str) -> dict[float, float]:
 		pass
 
 
