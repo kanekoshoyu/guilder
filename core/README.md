@@ -1,4 +1,6 @@
 # [guilder](../README.md)-core
 
 ## components
-- orderbook
+- CurrencyPair
+- Orderbook
+- IndexOrderbook
