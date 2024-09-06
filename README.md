@@ -1,4 +1,6 @@
-# Guilder: Unopinionated Cross-Exchange Crypto Trading Library
+# Guilder 
+> Unopinionated Cross-Exchange Crypto Trading Library
+
 [![crates](https://img.shields.io/crates/v/guilder-abstraction)](https://crates.io/crates/guilder-abstraction)
 [![license](https://img.shields.io/github/license/kanekoshoyu/guilder)](https://github.com/kanekoshoyu/guilder/blob/master/LICENSE)
 [![discord](https://img.shields.io/discord/1153997271294283827)](https://discord.gg/q3j5MYdwnm)  
@@ -14,15 +16,15 @@ an unopinionated multi-language, cross-exchange crypto trading library
 
 ## code structure
 
-| component                              | description                                                                                                                     |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [abstraction](./abstraction/README.md) | trading traits that abstract out each exchange                                                                                  |
-| [core](./core/README.md)               | key trading components built on top of guilder-abstraction                                                                      |
-| [client](./client/README.md)           | exchange clients that implement the abstraction using models from [exchange_yaml](https://github.com/kanekoshoyu/exchange_yaml) |
+| component                              | description                                                                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [abstraction](./abstraction/README.md) | trading traits that abstract out each exchange                                                                                              |
+| [core](./core/README.md)               | key trading components built on top of guilder-abstraction                                                                                  |
+| [client](./client/README.md)           | exchange clients that implement the abstraction using models from [exchange-collection](https://github.com/kanekoshoyu/exchange-collection) |
 
 ## guidelines to maintain unopinionated code
 - sync as default, async as feature.
-- abstraction definition (trading.yaml) only use 
+- [trading.yaml](./abstraction/trading.yaml) definition only use:
   - traits
   - primitive data type in Rust format, no external struct
   - custom primitive enum defined in yaml, most languages doesn't support struct within enum
@@ -45,4 +47,4 @@ If you want to get an exchange integrated, I can help get that up for an one-off
 Please contact [Sho Kaneko](https://github.com/kanekoshoyu) for details.
 
 ## see also
-- [exchange_yaml](https://github.com/kanekoshoyu/exchange_yaml) - collection of exchange OpenAPI/AsyncAPI docs and its generated models
+- [exchange-collection](https://github.com/kanekoshoyu/exchange-collection) - Crypto Exchange OpenAPI and Generated Models
