@@ -22,6 +22,17 @@ an unopinionated multi-language, cross-exchange crypto trading library
 | [core](./core/README.md)               | key trading components built on top of guilder-abstraction                                                                                  |
 | [client](./client/README.md)           | exchange clients that implement the abstraction using models from [exchange-collection](https://github.com/kanekoshoyu/exchange-collection) |
 
+## trait implementation status
+
+| trait | binance | hyperliquid |
+| ------------------- | ------- | ----------- |
+| `TestServer`        | ❌      | ❌          |
+| `GetMarketData`     | 🚧 stub | ❌          |
+| `ManageOrder`       | ❌      | ❌          |
+| `SubscribeMarketData` | ❌    | ❌          |
+
+legend: ✅ complete, 🚧 stub/in progress, ❌ not started
+
 ## guidelines to maintain unopinionated code
 - sync as default, async as feature.
 - [trading.yaml](./abstraction/trading.yaml) definition only use:

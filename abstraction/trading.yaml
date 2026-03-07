@@ -71,6 +71,23 @@ traits:
         description: cancel all order regardless of cloid/symbol
         return_type: bool
 
+  - name: SubscribeMarketData
+    description: subscribe to streaming market data
+    async: true
+    methods:
+      - name: subscribe_l2_update
+        description: subscribe to L2 orderbook updates for a symbol
+        return_type: Stream<L2Update>
+        args:
+          - name: symbol
+            type: String
+      - name: subscribe_fill
+        description: subscribe to market fill events for a symbol
+        return_type: Stream<Trade>
+        args:
+          - name: symbol
+            type: String
+
 # enum: keep it primitive
 enums:
   - name: Status
@@ -84,6 +101,68 @@ enums:
       - name: Failed
         description: "The task has failed."
 
+  - name: Side
+    description: "orderbook side"
+    values:
+      - name: Bid
+        description: "bid side of the orderbook"
+      - name: Ask
+        description: "ask side of the orderbook"
+
+  - name: OrderSide
+    description: "direction of an order"
+    values:
+      - name: Buy
+        description: "buy order"
+      - name: Sell
+        description: "sell order"
+
+  - name: MarketType
+    description: "type of market"
+    values:
+      - name: Spot
+        description: "spot market"
+      - name: Future
+        description: "dated futures contract"
+      - name: Perpetual
+        description: "perpetual futures contract"
+
+  - name: OrderType
+    description: "order execution type"
+    values:
+      - name: Market
+        description: "execute immediately at best available price"
+      - name: Limit
+        description: "execute at specified price or better"
+
+  - name: TimeInForce
+    description: "how long an order remains active"
+    values:
+      - name: Gtc
+        description: "good till cancel"
+      - name: Ioc
+        description: "immediate or cancel"
+      - name: Fok
+        description: "fill or kill"
+
+  - name: VolumeDenomination
+    description: "which currency the volume is expressed in"
+    values:
+      - name: Base
+        description: "volume in base currency (e.g. BTC in BTC-USDT)"
+      - name: Quote
+        description: "volume in quote currency (e.g. USDT in BTC-USDT)"
+
+  - name: AssetClass
+    description: "broad class of an asset"
+    values:
+      - name: Crypto
+        description: "non-stable cryptocurrency"
+      - name: Stablecoin
+        description: "price-stable cryptocurrency"
+      - name: Fiat
+        description: "government-issued currency"
+
 # struct: either primitive or enum
 structs:
   - name: Orderbook
@@ -93,3 +172,29 @@ structs:
         type: HashMap<f64, f64>
       - name: bids
         type: HashMap<f64, f64>
+
+  - name: L2Update
+    description: "single L2 orderbook price level update"
+    values:
+      - name: symbol
+        type: String
+      - name: price
+        type: f64
+      - name: volume
+        type: f64
+      - name: side
+        type: Side
+
+  - name: Trade
+    description: "market trade/fill event"
+    values:
+      - name: symbol
+        type: String
+      - name: price
+        type: f64
+      - name: volume
+        type: f64
+      - name: side
+        type: Side
+      - name: timestamp
+        type: i64

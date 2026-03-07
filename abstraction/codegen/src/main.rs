@@ -25,13 +25,29 @@ impl ProgrammingLanguage {
 struct YamlConfig {
     traits: Vec<Trait>,
     structs: Vec<Struct>,
-    // enums: Vec<Enums>
+    #[serde(default)]
+    enums: Vec<Enum>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct Enum {
+    name: String,
+    description: Option<String>,
+    values: Vec<EnumValue>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct EnumValue {
+    name: String,
+    description: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 struct Trait {
     name: String,
     description: Option<String>,
+    #[serde(default)]
+    r#async: bool,
     methods: Vec<TraitMethod>,
 }
 
@@ -88,6 +104,10 @@ enum ValueType {
     String,
     #[serde(rename = "()")]
     Unit,
+    // Represents a lazy pull-based sequence, from Iterator<T: ValueType>
+    Iter(Box<ValueType>),
+    // Represents an async push-based stream (e.g. WebSocket), from Stream<T: ValueType>
+    Stream(Box<ValueType>),
     // Represents arrays of a specific type, from Vec<T: ValueType>
     List(Box<ValueType>),
     // Represents arrays of a specific type, from HashMap<T: ValueType, U: ValueType>
@@ -100,6 +120,10 @@ enum ValueType {
 }
 impl ValueType {
     pub fn to_string(&self, language: ProgrammingLanguage) -> String {
+        self.to_string_async(language, false)
+    }
+
+    pub fn to_string_async(&self, language: ProgrammingLanguage, is_async: bool) -> String {
         match language {
             ProgrammingLanguage::Rust => match self {
                 Self::I8 => "i8".into(),
@@ -117,18 +141,21 @@ impl ValueType {
                 Self::Bool => "bool".into(),
                 Self::Char => "char".into(),
                 Self::String => "String".into(),
-                Self::Unit => "unit".into(),
-                Self::List(item_type) => {
-                    format!("Vec<{}>", item_type.to_string(ProgrammingLanguage::Rust))
+                Self::Unit => "()".into(),
+                Self::Stream(item_type) => {
+                    format!("impl Stream<Item = {}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
                 }
-                Self::Map {
-                    key_type,
-                    value_type,
-                } => {
+                Self::Iter(item_type) => {
+                    format!("impl Iterator<Item = {}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
+                }
+                Self::List(item_type) => {
+                    format!("Vec<{}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
+                }
+                Self::Map { key_type, value_type } => {
                     format!(
                         "HashMap<{}, {}>",
-                        key_type.to_string(ProgrammingLanguage::Rust),
-                        value_type.to_string(ProgrammingLanguage::Rust)
+                        key_type.to_string_async(ProgrammingLanguage::Rust, is_async),
+                        value_type.to_string_async(ProgrammingLanguage::Rust, is_async)
                     )
                 }
                 Self::CustomType(type_str) => type_str.clone(),
@@ -146,19 +173,29 @@ impl ValueType {
                 | Self::U128 => "int".into(),
                 Self::F32 | Self::F64 => "float".into(),
                 Self::Bool => "bool".into(),
-                Self::Char | Self::String => "str".into(), // Python has no single-character type, so `str` is used
-                Self::Unit => "None".to_string(), // Python equivalent of Rust's unit type ()
-                Self::List(item_type) => {
-                    format!("list[{}]", item_type.to_string(ProgrammingLanguage::Python))
+                Self::Char | Self::String => "str".into(),
+                Self::Unit => "None".to_string(),
+                Self::Stream(item_type) => {
+                    // Stream is always async push — maps to AsyncIterator regardless of trait flag
+                    let inner = item_type.to_string_async(ProgrammingLanguage::Python, is_async);
+                    format!("AsyncIterator[{}]", inner)
                 }
-                Self::Map {
-                    key_type,
-                    value_type,
-                } => {
+                Self::Iter(item_type) => {
+                    let inner = item_type.to_string_async(ProgrammingLanguage::Python, is_async);
+                    if is_async {
+                        format!("AsyncIterator[{}]", inner)
+                    } else {
+                        format!("Iterator[{}]", inner)
+                    }
+                }
+                Self::List(item_type) => {
+                    format!("list[{}]", item_type.to_string_async(ProgrammingLanguage::Python, is_async))
+                }
+                Self::Map { key_type, value_type } => {
                     format!(
                         "dict[{}, {}]",
-                        key_type.to_string(ProgrammingLanguage::Python),
-                        value_type.to_string(ProgrammingLanguage::Python)
+                        key_type.to_string_async(ProgrammingLanguage::Python, is_async),
+                        value_type.to_string_async(ProgrammingLanguage::Python, is_async)
                     )
                 }
                 Self::CustomType(type_str) => type_str.clone(),
@@ -193,16 +230,40 @@ impl<'de> Deserialize<'de> for ValueType {
     }
 }
 
+/// Find the position of the first comma at angle-bracket depth 0.
+/// This correctly handles nested generics like `HashMap<Vec<i32>, f64>`.
+fn find_top_level_comma(s: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn parse_value_type(value: &str) -> Result<ValueType, String> {
-    // TODO make this neater with the user of match
-    if value.starts_with("Vec<") && value.ends_with('>') {
+    if value.starts_with("Stream<") && value.ends_with('>') {
+        let inner_type_str = &value[7..value.len() - 1];
+        let inner_type = parse_value_type(inner_type_str)?;
+        Ok(ValueType::Stream(Box::new(inner_type)))
+    } else if value.starts_with("Iterator<") && value.ends_with('>') {
+        let inner_type_str = &value[9..value.len() - 1];
+        let inner_type = parse_value_type(inner_type_str)?;
+        Ok(ValueType::Iter(Box::new(inner_type)))
+    } else if value.starts_with("Vec<") && value.ends_with('>') {
         let inner_type_str = &value[4..value.len() - 1];
         let inner_type = parse_value_type(inner_type_str)?;
         Ok(ValueType::List(Box::new(inner_type)))
-    } else if value.starts_with("HashMap<") && value.ends_with('>') && value.contains(',') {
-        let comma_pos = value.find(',').unwrap();
-        let key_type_str = &value[8..comma_pos];
-        let value_type_str = &value[comma_pos + 2..value.len() - 1];
+    } else if value.starts_with("HashMap<") && value.ends_with('>') {
+        let inner = &value[8..value.len() - 1];
+        let comma_pos = find_top_level_comma(inner)
+            .ok_or_else(|| format!("HashMap type missing comma: {}", value))?;
+        let key_type_str = inner[..comma_pos].trim();
+        let value_type_str = inner[comma_pos + 1..].trim();
         let key_type = parse_value_type(key_type_str)?;
         let value_type = parse_value_type(value_type_str)?;
         Ok(ValueType::Map {
@@ -243,11 +304,29 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     let mut code = String::new();
 
     // dependencies
-    code.push_str("use std::collections::HashMap;\n\n");
+    code.push_str("use std::collections::HashMap;\n");
+    code.push_str("use futures_core::Stream;\n\n");
+
+    // enums
+    for en in &config.enums {
+        if let Some(desc) = &en.description {
+            code.push_str(&format!("/// {}\n", desc));
+        }
+        code.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+        code.push_str(&format!("pub enum {} {{\n", en.name));
+        for value in &en.values {
+            if let Some(desc) = &value.description {
+                code.push_str(&format!("\t/// {}\n", desc));
+            }
+            code.push_str(&format!("\t{},\n", value.name));
+        }
+        code.push_str("}\n\n");
+    }
 
     // structs
     for st in config.structs {
         code.push_str(&format!("/// {}\n", st.description));
+        code.push_str("#[derive(Debug, Clone)]\n");
         code.push_str(&format!("pub struct {} {{\n", st.name));
 
         for value in st.values {
@@ -263,30 +342,34 @@ fn codegen_str_rust(config: YamlConfig) -> String {
 
     // traits
     for tr in config.traits {
-        if let Some(description) = tr.description {
+        if let Some(description) = &tr.description {
             code.push_str(&format!("/// {}\n", description));
+        }
+        if tr.r#async {
+            code.push_str("#[allow(async_fn_in_trait)]\n");
         }
         code.push_str(&format!("pub trait {} {{\n", tr.name));
 
         for method in tr.methods {
-            // Create the arguments list with &self included
-            let mut args: Vec<String> = vec!["&self".to_string()]; // Add &self as the first argument
+            let mut args: Vec<String> = vec!["&self".to_string()];
             args.extend(
                 method
                     .args
                     .iter()
-                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language))),
+                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string_async(language, tr.r#async))),
             );
             let args_str = args.join(", ");
 
             if let Some(description) = method.description {
                 code.push_str(&format!("\t/// {}\n", description));
             }
+            let fn_keyword = if tr.r#async { "async fn" } else { "fn" };
             code.push_str(&format!(
-                "\tfn {}({}) -> {};\n",
+                "\t{} {}({}) -> {};\n",
+                fn_keyword,
                 method.name,
                 args_str,
-                method.return_type.to_string(language)
+                method.return_type.to_string_async(language, tr.r#async)
             ));
         }
 
@@ -300,8 +383,29 @@ fn codegen_str_python(config: YamlConfig) -> String {
     let language = ProgrammingLanguage::Python;
     let mut code = String::new();
 
+    let has_async = config.traits.iter().any(|t| t.r#async);
+
     // Import the necessary ABC modules at the top
-    code.push_str("from abc import ABC, abstractmethod\n\n");
+    code.push_str("from abc import ABC, abstractmethod\n");
+    code.push_str("from enum import Enum\n");
+    if has_async {
+        code.push_str("from typing import Iterator, AsyncIterator\n");
+    } else {
+        code.push_str("from typing import Iterator\n");
+    }
+    code.push_str("\n");
+
+    // enums
+    for en in &config.enums {
+        code.push_str(&format!("class {}(Enum):\n", en.name));
+        if let Some(desc) = &en.description {
+            code.push_str(&format!("\t\"\"\"{}\"\"\"\n", desc));
+        }
+        for (i, value) in en.values.iter().enumerate() {
+            code.push_str(&format!("\t{} = {}\n", value.name, i + 1));
+        }
+        code.push_str("\n");
+    }
 
     // structs
     for st in config.structs {
@@ -326,28 +430,28 @@ fn codegen_str_python(config: YamlConfig) -> String {
 
     // traits
     for tr in config.traits {
-        // Define the class and indicate it inherits from ABC
         code.push_str(&format!("class {}(ABC):\n", tr.name));
-        if let Some(description) = tr.description {
+        if let Some(description) = &tr.description {
             code.push_str(&format!("\t\"\"\"{}\"\"\"\n", description));
         }
         for method in tr.methods {
-            let mut args: Vec<String> = vec!["self".to_string()]; // Add &self as the first argument
+            let mut args: Vec<String> = vec!["self".to_string()];
             args.extend(
                 method
                     .args
                     .iter()
-                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string(language))),
+                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string_async(language, tr.r#async))),
             );
             let args_str = args.join(", ");
 
-            // Add the abstractmethod decorator
             code.push_str("\t@abstractmethod\n");
+            let def_keyword = if tr.r#async { "async def" } else { "def" };
             code.push_str(&format!(
-                "\tdef {}({}) -> {}:\n",
+                "\t{} {}({}) -> {}:\n",
+                def_keyword,
                 method.name,
                 args_str,
-                method.return_type.to_string(language)
+                method.return_type.to_string_async(language, tr.r#async)
             ));
             if let Some(description) = method.description {
                 code.push_str(&format!("\t\t\"\"\"{}\"\"\"\n", description));
