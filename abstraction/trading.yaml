@@ -1,6 +1,7 @@
 traits:
   - name: TestServer
     description: test server network connection
+    async: true
     methods:
       - name: ping
         description: test ping
@@ -11,6 +12,7 @@ traits:
 
   - name: GetMarketData
     description: get market data such as symbol, price and volume
+    async: true
     methods:
       - name: get_symbol
         description: get symbol, such as BTCUSD
@@ -21,13 +23,6 @@ traits:
         args:
           - name: symbol
             type: String
-      - name: get_orderbook
-        description: get orderbook
-        return_type: Orderbook
-        args:
-          - name: symbol
-            type: String
-
   # TODO define get_ohlcv,
   # first check what is the common API
   # and then see if we can map this with yaml
@@ -40,6 +35,7 @@ traits:
 
   - name: ManageOrder
     description: place, change, cancel order
+    async: true
     methods:
       - name: place_order
         description: place order, return cloid
@@ -83,7 +79,7 @@ traits:
             type: String
       - name: subscribe_fill
         description: subscribe to market fill events for a symbol
-        return_type: Stream<Trade>
+        return_type: Stream<Fill>
         args:
           - name: symbol
             type: String
@@ -165,14 +161,6 @@ enums:
 
 # struct: either primitive or enum
 structs:
-  - name: Orderbook
-    description: "order book, with asks and bids (key: price, value: volume)"
-    values:
-      - name: asks
-        type: HashMap<f64, f64>
-      - name: bids
-        type: HashMap<f64, f64>
-
   - name: L2Update
     description: "single L2 orderbook price level update"
     values:
@@ -184,8 +172,10 @@ structs:
         type: f64
       - name: side
         type: Side
+      - name: sequence
+        type: i64
 
-  - name: Trade
+  - name: Fill
     description: "market trade/fill event"
     values:
       - name: symbol
@@ -195,6 +185,8 @@ structs:
       - name: volume
         type: f64
       - name: side
-        type: Side
+        type: OrderSide
       - name: timestamp
+        type: i64
+      - name: trade_id
         type: i64

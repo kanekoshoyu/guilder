@@ -1,0 +1,203 @@
+use guilder_abstraction::{self, L2Update, Fill, Side, OrderSide};
+use futures_core::Stream;
+use futures_util::{SinkExt, StreamExt};
+use reqwest::Client;
+use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashMap;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+const HYPERLIQUID_INFO_URL: &str = "https://api.hyperliquid.xyz/info";
+const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
+
+pub struct HyperliquidClient {
+    client: Client,
+}
+
+impl HyperliquidClient {
+    pub fn new() -> Self {
+        HyperliquidClient { client: Client::new() }
+    }
+}
+
+// --- Deserialization types for Hyperliquid REST responses ---
+
+#[derive(Deserialize)]
+struct MetaResponse {
+    universe: Vec<AssetInfo>,
+}
+
+#[derive(Deserialize)]
+struct AssetInfo {
+    name: String,
+}
+
+// --- WebSocket envelope and data shapes ---
+
+#[derive(Deserialize)]
+struct WsEnvelope {
+    channel: String,
+    data: Value,
+}
+
+#[derive(Deserialize)]
+struct WsBook {
+    coin: String,
+    levels: Vec<Vec<WsLevel>>,
+    time: i64,
+}
+
+#[derive(Deserialize)]
+struct WsLevel {
+    px: String,
+    sz: String,
+}
+
+#[derive(Deserialize)]
+struct WsTrade {
+    coin: String,
+    side: String,
+    px: String,
+    sz: String,
+    time: i64,
+    tid: i64,
+}
+
+// --- Trait implementations ---
+
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::TestServer for HyperliquidClient {
+    /// Sends a lightweight allMids request; returns true if the server responds 200 OK.
+    async fn ping(&self) -> bool {
+        self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "allMids"}))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+
+    /// Hyperliquid has no dedicated server-time endpoint; returns local UTC ms.
+    async fn get_server_time(&self) -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+}
+
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::GetMarketData for HyperliquidClient {
+    /// Returns all perpetual asset names from Hyperliquid's meta endpoint.
+    async fn get_symbol(&self) -> Vec<String> {
+        let Ok(resp) = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "meta"}))
+            .send()
+            .await
+        else {
+            return Vec::new();
+        };
+        resp.json::<MetaResponse>()
+            .await
+            .map(|r| r.universe.into_iter().map(|a| a.name).collect())
+            .unwrap_or_default()
+    }
+
+    /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
+    async fn get_price(&self, symbol: String) -> f64 {
+        let Ok(resp) = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "allMids"}))
+            .send()
+            .await
+        else {
+            return 0.0;
+        };
+        resp.json::<HashMap<String, String>>()
+            .await
+            .ok()
+            .and_then(|mids| mids.get(&symbol).and_then(|s| s.parse().ok()))
+            .unwrap_or(0.0)
+    }
+}
+
+#[allow(unused_variables)]
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::ManageOrder for HyperliquidClient {
+    async fn place_order(&self, symbol: String, price: i32, volume: i32) -> i64 {
+        unimplemented!()
+    }
+
+    async fn change_order_by_cloid(&self, cloid: i64, price: i32, volume: i32) -> i64 {
+        unimplemented!()
+    }
+
+    async fn cancel_order(&self, cloid: i64) -> i64 {
+        unimplemented!()
+    }
+
+    async fn cancel_all_order(&self) -> bool {
+        unimplemented!()
+    }
+}
+
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
+    /// Streams L2 orderbook updates for `symbol`. Each message from Hyperliquid is a
+    /// full-depth snapshot; every level is emitted as an individual `L2Update` event.
+    fn subscribe_l2_update(&self, symbol: String) -> impl Stream<Item = L2Update> {
+        async_stream::stream! {
+            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
+            let sub = serde_json::json!({
+                "method": "subscribe",
+                "subscription": {"type": "l2Book", "coin": symbol}
+            });
+            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
+
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
+                if env.channel != "l2Book" { continue; }
+                let Ok(book) = serde_json::from_value::<WsBook>(env.data) else { continue; };
+
+                for level in book.levels.first().into_iter().flatten() {
+                    if let (Ok(price), Ok(volume)) = (level.px.parse(), level.sz.parse()) {
+                        yield L2Update { symbol: book.coin.clone(), price, volume, side: Side::Ask, sequence: book.time };
+                    }
+                }
+                for level in book.levels.get(1).into_iter().flatten() {
+                    if let (Ok(price), Ok(volume)) = (level.px.parse(), level.sz.parse()) {
+                        yield L2Update { symbol: book.coin.clone(), price, volume, side: Side::Bid, sequence: book.time };
+                    }
+                }
+            }
+        }
+    }
+
+    /// Streams public trade fills for `symbol`. Maps to Hyperliquid's `trades` subscription.
+    /// `side` reflects the aggressor: "B" (buyer) → `Side::Bid`, otherwise → `Side::Ask`.
+    fn subscribe_fill(&self, symbol: String) -> impl Stream<Item = Fill> {
+        async_stream::stream! {
+            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
+            let sub = serde_json::json!({
+                "method": "subscribe",
+                "subscription": {"type": "trades", "coin": symbol}
+            });
+            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
+
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
+                if env.channel != "trades" { continue; }
+                let Ok(trades) = serde_json::from_value::<Vec<WsTrade>>(env.data) else { continue; };
+
+                for trade in trades {
+                    let side = if trade.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
+                    if let (Ok(price), Ok(volume)) = (trade.px.parse(), trade.sz.parse()) {
+                        yield Fill { symbol: trade.coin, price, volume, side, timestamp: trade.time, trade_id: trade.tid };
+                    }
+                }
+            }
+        }
+    }
+}

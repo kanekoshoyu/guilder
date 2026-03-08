@@ -26,7 +26,7 @@ Unopinionated multi-language cross-exchange crypto trading library in Rust.
 
 ## Design Principles
 
-- Sync by default, async as a feature flag
+- Sync by default, async as a per-trait flag (`async: true` in trading.yaml)
 - `trading.yaml` uses only primitives, custom enums/structs — no external types
 - Generated code uses only the standard library
 - Core uses only standard + networking libraries by default; variants (dashmap, tokio) are feature-gated

@@ -304,8 +304,27 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     let mut code = String::new();
 
     // dependencies
-    code.push_str("use std::collections::HashMap;\n");
-    code.push_str("use futures_core::Stream;\n\n");
+    fn uses_map(vt: &ValueType) -> bool {
+        match vt {
+            ValueType::Map { .. } => true,
+            ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => uses_map(inner),
+            _ => false,
+        }
+    }
+    let has_map = config.structs.iter().any(|s| s.values.iter().any(|v| uses_map(&v.value_type)))
+        || config.traits.iter().any(|tr| tr.methods.iter().any(|m| {
+            uses_map(&m.return_type) || m.args.iter().any(|a| uses_map(&a.arg_type))
+        }));
+    if has_map {
+        code.push_str("use std::collections::HashMap;\n");
+    }
+    let has_stream = config.traits.iter().any(|tr| {
+        tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
+    });
+    if has_stream {
+        code.push_str("use futures_core::Stream;\n");
+    }
+    code.push_str("\n");
 
     // enums
     for en in &config.enums {
@@ -363,7 +382,8 @@ fn codegen_str_rust(config: YamlConfig) -> String {
             if let Some(description) = method.description {
                 code.push_str(&format!("\t/// {}\n", description));
             }
-            let fn_keyword = if tr.r#async { "async fn" } else { "fn" };
+            let is_streaming = matches!(method.return_type, ValueType::Stream(_));
+            let fn_keyword = if tr.r#async && !is_streaming { "async fn" } else { "fn" };
             code.push_str(&format!(
                 "\t{} {}({}) -> {};\n",
                 fn_keyword,
@@ -465,6 +485,152 @@ fn codegen_str_python(config: YamlConfig) -> String {
     code
 }
 
+fn collect_custom_types(vt: &ValueType, out: &mut Vec<String>) {
+    match vt {
+        ValueType::CustomType(s) => {
+            if !out.contains(s) {
+                out.push(s.clone());
+            }
+        }
+        ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => {
+            collect_custom_types(inner, out)
+        }
+        ValueType::Map {
+            key_type,
+            value_type,
+        } => {
+            collect_custom_types(key_type, out);
+            collect_custom_types(value_type, out);
+        }
+        _ => {}
+    }
+}
+
+fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
+    let language = ProgrammingLanguage::Rust;
+    let mut code = String::new();
+
+    // collect custom types used across all traits
+    let mut custom_types: Vec<String> = Vec::new();
+    for tr in &config.traits {
+        for method in &tr.methods {
+            collect_custom_types(&method.return_type, &mut custom_types);
+            for arg in &method.args {
+                collect_custom_types(&arg.arg_type, &mut custom_types);
+            }
+        }
+    }
+
+    // imports
+    if custom_types.is_empty() {
+        code.push_str("use guilder_abstraction;\n");
+    } else {
+        code.push_str(&format!(
+            "use guilder_abstraction::{{self, {}}};\n",
+            custom_types.join(", ")
+        ));
+    }
+    let has_stream = config.traits.iter().any(|tr| {
+        tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
+    });
+    if has_stream {
+        code.push_str("use futures_core::Stream;\n");
+        code.push_str("use futures_util::stream;\n");
+    }
+    code.push_str("use reqwest::Client;\n\n");
+
+    // struct definition
+    code.push_str(&format!(
+        "pub struct {} {{\n    client: Client,\n}}\n\n",
+        struct_name
+    ));
+
+    // new() constructor
+    code.push_str(&format!(
+        "impl {} {{\n    pub fn new() -> Self {{\n        {} {{ client: Client::new() }}\n    }}\n}}\n\n",
+        struct_name, struct_name
+    ));
+
+    // trait impl stubs
+    for tr in &config.traits {
+        let allow = if tr.r#async {
+            "#[allow(unused_variables)]\n#[allow(async_fn_in_trait)]\n"
+        } else {
+            "#[allow(unused_variables)]\n"
+        };
+        code.push_str(&format!(
+            "{}impl guilder_abstraction::{} for {} {{\n",
+            allow, tr.name, struct_name
+        ));
+        for method in &tr.methods {
+            let mut args: Vec<String> = vec!["&self".to_string()];
+            args.extend(
+                method
+                    .args
+                    .iter()
+                    .map(|a| format!("{}: {}", a.name, a.arg_type.to_string_async(language, tr.r#async))),
+            );
+            let args_str = args.join(", ");
+            let is_streaming = matches!(method.return_type, ValueType::Stream(_));
+            let fn_keyword = if tr.r#async && !is_streaming { "async fn" } else { "fn" };
+            let body = if is_streaming { "stream::pending()" } else { "unimplemented!()" };
+            code.push_str(&format!(
+                "    {} {}({}) -> {} {{\n        {}\n    }}\n\n",
+                fn_keyword,
+                method.name,
+                args_str,
+                method.return_type.to_string_async(language, tr.r#async),
+                body
+            ));
+        }
+        code.push_str("}\n\n");
+    }
+
+    code
+}
+
+fn codegen_template_cargo_toml() -> String {
+    r#"[package]
+name = "guilder-client-<exchange>"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+guilder-abstraction = { version = "0.1" }
+reqwest = { version = "0.12", features = ["json"] }
+futures-core = "0.3"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+"#.to_string()
+}
+
+fn codegen_template(config: &YamlConfig, output_base: &str) {
+    let dir = format!("{}/guilder-client-template", output_base);
+    let src_dir = format!("{}/src", dir);
+
+    if let Err(e) = std::fs::create_dir_all(&src_dir) {
+        println!("error creating template dir: {e}");
+        return;
+    }
+
+    let cargo_path = format!("{}/Cargo.toml", dir);
+    if let Err(e) = std::fs::write(&cargo_path, codegen_template_cargo_toml()) {
+        println!("error writing {cargo_path}: {e}");
+    } else {
+        println!("generated {cargo_path}");
+    }
+
+    let client_path = format!("{}/src/client.rs", dir);
+    let code = codegen_client_rust("ExchangeClient", config);
+    if let Err(e) = std::fs::write(&client_path, code) {
+        println!("error writing {client_path}: {e}");
+    } else {
+        println!("generated {client_path}");
+    }
+}
+
 fn codegen(
     config: YamlConfig,
     language: ProgrammingLanguage,
@@ -511,4 +677,5 @@ fn main() {
             println!("error: {e}");
         }
     }
+    codegen_template(&config, "../../client");
 }

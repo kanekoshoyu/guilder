@@ -1,5 +1,4 @@
 use super::currency_pair::CurrencyPair;
-use guilder_abstraction::Orderbook as RawOrderBook;
 use ordered_float::OrderedFloat;
 use std::collections::{BTreeMap, HashMap};
 
@@ -9,23 +8,7 @@ pub struct Orderbook {
     bids: BTreeMap<OrderedFloat<f64>, f64>,
 }
 
-impl From<RawOrderBook> for Orderbook {
-    fn from(raw: RawOrderBook) -> Self {
-        let asks = raw
-            .asks
-            .clone()
-            .into_iter()
-            .map(|(key, value)| (key.into(), value))
-            .collect();
-        let bids = raw
-            .bids
-            .clone()
-            .into_iter()
-            .map(|(key, value)| (key.into(), value))
-            .collect();
-        Orderbook { asks, bids }
-    }
-}
+
 impl Orderbook {
     /// lowest priced ask
     pub fn best_ask(&self) -> Option<(&OrderedFloat<f64>, &f64)> {

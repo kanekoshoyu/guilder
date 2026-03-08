@@ -1,61 +1,94 @@
-# Guilder 
-> Unopinionated Cross-Exchange Crypto Trading Library
+# Guilder
 
 [![crates](https://img.shields.io/crates/v/guilder-abstraction)](https://crates.io/crates/guilder-abstraction)
 [![license](https://img.shields.io/github/license/kanekoshoyu/guilder)](https://github.com/kanekoshoyu/guilder/blob/master/LICENSE)
-[![discord](https://img.shields.io/discord/1153997271294283827)](https://discord.gg/q3j5MYdwnm)  
+[![discord](https://img.shields.io/discord/1153997271294283827)](https://discord.gg/q3j5MYdwnm)
 
-an unopinionated multi-language, cross-exchange crypto trading library
+Unopinionated multi-language cross-exchange crypto trading library in Rust.
 
-## how it works
-- **guilder-abstraction** defines the common traits for crypto trading. It's specs are defined in a single YAML and trait codes are auto-generated.
-- As we implement trading strategies purely using these traits, we can switch to new exchange with minimal marginal effort.
-- We can either auto-generate cross-language (e.g. python) FFI bindings in the future, or we can just implement them natively in different languages. Main support will be in Rust.
-- Each exchange has to implement **guilder-abstraction**, and we use exchange-yaml models to create the client with ease. We can also implement the traits on any custom models. 
+## The idea
 
+Every crypto exchange has a different API, but they all do the same things: get prices, place orders, stream market data. Guilder defines those operations as a shared set of traits in a YAML file, auto-generates the trait code, and lets exchange clients implement them. Strategies written against the traits work on any exchange with no changes.
 
-## code structure
+## Repository layout
 
-| component                              | description                                                                                                                                 |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| [abstraction](./abstraction/README.md) | trading traits that abstract out each exchange                                                                                              |
-| [core](./core/README.md)               | key trading components built on top of guilder-abstraction                                                                                  |
-| [client](./client/README.md)           | exchange clients that implement the abstraction using models from [exchange-collection](https://github.com/kanekoshoyu/exchange-collection) |
+```
+abstraction/
+  trading.yaml          # source of truth — traits, structs, enums defined in a language-neutral DSL
+  codegen/              # Rust binary that reads trading.yaml and writes generated code
+  target/
+    rust/               # generated Rust trait definitions (published to crates.io as guilder-abstraction)
+    python/             # generated Python abstract base classes
 
-## trait implementation status
+core/                   # reusable trading components (Orderbook, CurrencyPair) built on the traits
 
-| trait | binance | hyperliquid |
-| ------------------- | ------- | ----------- |
-| `TestServer`        | ❌      | ❌          |
-| `GetMarketData`     | 🚧 stub | ❌          |
-| `ManageOrder`       | ❌      | ❌          |
-| `SubscribeMarketData` | ❌    | ❌          |
+client/
+  guilder-client-template/   # generated starting point for a new exchange client (not a real crate)
+  guilder-client-binance/    # Binance implementation
+  guilder-client-hyperliquid/ # Hyperliquid implementation
+```
 
-legend: ✅ complete, 🚧 stub/in progress, ❌ not started
+## How codegen works
 
-## guidelines to maintain unopinionated code
-- sync as default, async as feature.
-- [trading.yaml](./abstraction/trading.yaml) definition only use:
-  - traits
-  - primitive data type in Rust format, no external struct
-  - custom primitive enum defined in yaml, most languages doesn't support struct within enum
-  - custom struct defined in yaml using either primitives or enum, no nesting
-- generated abstraction code only use standard libraries.
-- core only use standard and networking libraries in default. 
-- any variants (e.g. dashmap, tokio, string-intern) should be defined with feature.
+1. Edit `abstraction/trading.yaml` to add or change traits, structs, or enums.
+2. Run the codegen:
+   ```
+   cd abstraction/codegen && cargo run
+   ```
+3. Codegen writes:
+   - `abstraction/target/rust/src/guilder_abstraction.rs` — Rust trait and type definitions
+   - `abstraction/target/python/guilder_abstraction.py` — Python abstract base classes
+   - `client/guilder-client-template/` — a fresh client template (see below)
 
-## why the name?
-**Dutch Guilder** was the currency used for 500+ years across the East India Company era for trading. I hope guilder trading library will be used by a lot of people for years. It also rhymes with **builder**.
+Never edit the generated files directly — they will be overwritten on the next codegen run.
 
-In order to achieve it, we should make guilder:
-- support more exchanges
-- keep it versatile
-  
+## Adding a new exchange client
 
-## partnership
-I keep this project opensource so that everyone can take part of it. 
-If you want to get an exchange integrated, I can help get that up for an one-off cost in 3 weeks, just enough to pay my freelancing partner to get it done.
-Please contact [Sho Kaneko](https://github.com/kanekoshoyu) for details.
+1. Run the codegen to get an up-to-date template.
+2. Copy `client/guilder-client-template/` to `client/guilder-client-<exchange>/`.
+3. In the new directory:
+   - Rename the package in `Cargo.toml`.
+   - Replace `ExchangeClient` with your struct name (e.g. `BinanceClient`).
+   - Implement each method — they all start as `unimplemented!()`.
+4. Add your crate to the workspace if needed.
 
-## see also
-- [exchange-collection](https://github.com/kanekoshoyu/exchange-collection) - Crypto Exchange OpenAPI and Generated Models
+## Traits
+
+| Trait | Description | Async |
+|---|---|---|
+| `TestServer` | Ping and server time | yes |
+| `GetMarketData` | Symbols, prices, orderbook snapshots | yes |
+| `ManageOrder` | Place, modify, cancel orders | yes |
+| `SubscribeMarketData` | Streaming L2 updates and fills via `Stream` | yes |
+
+## Implementation status
+
+| Trait | binance | hyperliquid |
+|---|---|---|
+| `TestServer` | ❌ | ✅ |
+| `GetMarketData` | ❌ | ✅ |
+| `ManageOrder` | ❌ | ❌ |
+| `SubscribeMarketData` | ❌ | ✅ |
+
+legend: ✅ complete, 🚧 partial, ❌ not started
+
+## TODO
+
+1. ~~**`Fill.side` wrong type**~~ — fixed: `Fill.side` is now `OrderSide` (Buy/Sell); Hyperliquid `"B"` → `Buy`, `"A"` → `Sell`.
+2. ~~**`Fill` missing trade ID**~~ — fixed: `tid: i64` added to `Fill`.
+3. ~~**L2 snapshot boundary not signalled**~~ — fixed: `sequence: i64` added to `L2Update`. All levels in the same snapshot share the same value; a sequence change signals a new snapshot.
+
+## Design constraints
+
+- `trading.yaml` uses only primitives and types defined within the YAML itself — no external crate types.
+- Generated abstraction code uses only the standard library.
+- All traits are async.
+- `Stream` return types (for subscriptions) stay as `fn` returning `impl Stream`, not `async fn`.
+
+## Why "Guilder"?
+
+The Dutch Guilder was the currency of the East India Company for 500+ years — the original cross-exchange trading infrastructure. It also rhymes with *builder*.
+
+## See also
+
+- [exchange-collection](https://github.com/kanekoshoyu/exchange-collection) — Crypto exchange OpenAPI specs and generated models

@@ -6,3 +6,11 @@ edition = "2021"
 [dependencies]
 # development: path, deployment: version
 guilder-abstraction = { path = "../../abstraction/target/rust", version = "0.1.1" }
+reqwest = { workspace = true, features = ["json"] }
+futures-core.workspace = true
+futures-util = "0.3"
+serde = { workspace = true }
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+async-stream = "0.3"
