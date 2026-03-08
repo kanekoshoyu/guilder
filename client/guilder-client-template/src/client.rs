@@ -1,5 +1,4 @@
 use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<f64, String>, L2Update, Fill, AssetContext, Liquidation};
-use futures_core::Stream;
 use futures_util::stream;
 use reqwest::Client;
 
@@ -67,20 +66,20 @@ impl guilder_abstraction::ManageOrder for ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketData for ExchangeClient {
-    fn subscribe_l2_update(&self, symbol: String) -> impl Stream<Item = L2Update> {
-        stream::pending()
+    fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update> {
+        Box::pin(stream::pending())
     }
 
-    fn subscribe_fill(&self, symbol: String) -> impl Stream<Item = Fill> {
-        stream::pending()
+    fn subscribe_fill(&self, symbol: String) -> BoxStream<Fill> {
+        Box::pin(stream::pending())
     }
 
-    fn subscribe_asset_context(&self, symbol: String) -> impl Stream<Item = AssetContext> {
-        stream::pending()
+    fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext> {
+        Box::pin(stream::pending())
     }
 
-    fn subscribe_liquidation(&self, user: String) -> impl Stream<Item = Liquidation> {
-        stream::pending()
+    fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation> {
+        Box::pin(stream::pending())
     }
 
 }

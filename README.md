@@ -83,7 +83,7 @@ legend: ✅ complete, 🚧 partial, ❌ not started
 7. ~~**Missing data: liquidations**~~ — fixed: `Liquidation` struct added; `subscribe_liquidation(user) -> Stream<Liquidation>` added to `SubscribeMarketData`. Takes a user address (Hyperliquid's `userEvents` is per-address, not per-symbol).
 8. ~~**Missing data: 24h volume**~~ — fixed: covered by `AssetContext.day_volume` from `subscribe_asset_context`.
 9. ~~**No `Result` on trait methods**~~ — fixed: all async methods now return `Result<T, String>`. Stream methods stay as `Stream<T>` (connection failure terminates the stream).
-10. **`SubscribeMarketData` is not object-safe** — `impl Stream` return type prevents `Box<dyn SubscribeMarketData>`. Every call site must be monomorphised. Needs architectural decision (e.g. return `Pin<Box<dyn Stream>>` instead).
+10. ~~**`SubscribeMarketData` is not object-safe**~~ — fixed: stream methods now return `BoxStream<T>` (a `Pin<Box<dyn Stream<Item = T> + Send + 'static>>` alias defined in the abstraction). `Box<dyn SubscribeMarketData>` now works.
 
 ## Design constraints
 

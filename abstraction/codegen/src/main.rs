@@ -143,7 +143,7 @@ impl ValueType {
                 Self::String => "String".into(),
                 Self::Unit => "()".into(),
                 Self::Stream(item_type) => {
-                    format!("impl Stream<Item = {}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
+                    format!("BoxStream<{}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
                 }
                 Self::Iter(item_type) => {
                     format!("impl Iterator<Item = {}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
@@ -322,7 +322,9 @@ fn codegen_str_rust(config: YamlConfig) -> String {
         tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
     });
     if has_stream {
+        code.push_str("use std::pin::Pin;\n");
         code.push_str("use futures_core::Stream;\n");
+        code.push_str("\npub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;\n");
     }
     code.push_str("\n");
 
@@ -534,7 +536,6 @@ fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
         tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
     });
     if has_stream {
-        code.push_str("use futures_core::Stream;\n");
         code.push_str("use futures_util::stream;\n");
     }
     code.push_str("use reqwest::Client;\n\n");
@@ -573,7 +574,7 @@ fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
             let args_str = args.join(", ");
             let is_streaming = matches!(method.return_type, ValueType::Stream(_));
             let fn_keyword = if tr.r#async && !is_streaming { "async fn" } else { "fn" };
-            let body = if is_streaming { "stream::pending()" } else { "unimplemented!()" };
+            let body = if is_streaming { "Box::pin(stream::pending())" } else { "unimplemented!()" };
             code.push_str(&format!(
                 "    {} {}({}) -> {} {{\n        {}\n    }}\n\n",
                 fn_keyword,

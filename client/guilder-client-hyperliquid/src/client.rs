@@ -1,5 +1,4 @@
-use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, Side, OrderSide};
-use futures_core::Stream;
+use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream, Side, OrderSide};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
@@ -203,8 +202,8 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     /// Streams L2 orderbook updates for `symbol`. Each message from Hyperliquid is a
     /// full-depth snapshot; every level is emitted as an individual `L2Update` event.
-    fn subscribe_l2_update(&self, symbol: String) -> impl Stream<Item = L2Update> {
-        async_stream::stream! {
+    fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update> {
+        Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
                 "method": "subscribe",
@@ -228,13 +227,13 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     }
                 }
             }
-        }
+        })
     }
 
     /// Streams asset context updates for `symbol` via Hyperliquid's `activeAssetCtx` subscription.
     /// Each message carries OI, funding rate, mark price, and 24h notional volume.
-    fn subscribe_asset_context(&self, symbol: String) -> impl Stream<Item = AssetContext> {
-        async_stream::stream! {
+    fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext> {
+        Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
                 "method": "subscribe",
@@ -256,12 +255,12 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     yield AssetContext { symbol: update.coin, open_interest, funding_rate, mark_price, day_volume };
                 }
             }
-        }
+        })
     }
 
     /// Streams liquidation events for a user address via Hyperliquid's `userEvents` subscription.
-    fn subscribe_liquidation(&self, user: String) -> impl Stream<Item = Liquidation> {
-        async_stream::stream! {
+    fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation> {
+        Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
                 "method": "subscribe",
@@ -281,13 +280,13 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     yield Liquidation { liquidated_user: liq.liquidated_user, notional_position, account_value };
                 }
             }
-        }
+        })
     }
 
     /// Streams public trade fills for `symbol`. Maps to Hyperliquid's `trades` subscription.
-    /// `side` reflects the aggressor: "B" (buyer) → `Side::Bid`, otherwise → `Side::Ask`.
-    fn subscribe_fill(&self, symbol: String) -> impl Stream<Item = Fill> {
-        async_stream::stream! {
+    /// `side` reflects the aggressor: "B" (buyer) → `OrderSide::Buy`, otherwise → `OrderSide::Sell`.
+    fn subscribe_fill(&self, symbol: String) -> BoxStream<Fill> {
+        Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
                 "method": "subscribe",
@@ -307,6 +306,6 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     }
                 }
             }
-        }
+        })
     }
 }

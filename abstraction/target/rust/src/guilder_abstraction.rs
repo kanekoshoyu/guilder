@@ -1,4 +1,7 @@
+use std::pin::Pin;
 use futures_core::Stream;
+
+pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
@@ -157,12 +160,12 @@ pub trait ManageOrder {
 #[allow(async_fn_in_trait)]
 pub trait SubscribeMarketData {
 	/// subscribe to L2 orderbook updates for a symbol
-	fn subscribe_l2_update(&self, symbol: String) -> impl Stream<Item = L2Update>;
+	fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update>;
 	/// subscribe to market fill events for a symbol
-	fn subscribe_fill(&self, symbol: String) -> impl Stream<Item = Fill>;
+	fn subscribe_fill(&self, symbol: String) -> BoxStream<Fill>;
 	/// subscribe to asset context updates (OI, funding rate, mark price, 24h volume)
-	fn subscribe_asset_context(&self, symbol: String) -> impl Stream<Item = AssetContext>;
+	fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext>;
 	/// subscribe to liquidation events for a user address
-	fn subscribe_liquidation(&self, user: String) -> impl Stream<Item = Liquidation>;
+	fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation>;
 }
 
