@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<f64, String>, L2Update, Fill, AssetContext, Liquidation};
 use futures_core::Stream;
 use futures_util::stream;
 use reqwest::Client;
@@ -16,11 +16,11 @@ impl ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::TestServer for ExchangeClient {
-    async fn ping(&self) -> bool {
+    async fn ping(&self) -> Result<bool, String> {
         unimplemented!()
     }
 
-    async fn get_server_time(&self) -> i64 {
+    async fn get_server_time(&self) -> Result<i64, String> {
         unimplemented!()
     }
 
@@ -29,15 +29,15 @@ impl guilder_abstraction::TestServer for ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::GetMarketData for ExchangeClient {
-    async fn get_symbol(&self) -> Vec<String> {
+    async fn get_symbol(&self) -> Result<Vec<String>, String> {
         unimplemented!()
     }
 
-    async fn get_price(&self, symbol: String) -> f64 {
+    async fn get_price(&self, symbol: String) -> Result<f64, String> {
         unimplemented!()
     }
 
-    async fn get_open_interest(&self, symbol: String) -> f64 {
+    async fn get_open_interest(&self, symbol: String) -> Result<f64, String> {
         unimplemented!()
     }
 
@@ -46,19 +46,19 @@ impl guilder_abstraction::GetMarketData for ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for ExchangeClient {
-    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> i64 {
+    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> i64 {
+    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn cancel_order(&self, cloid: i64) -> i64 {
+    async fn cancel_order(&self, cloid: i64) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn cancel_all_order(&self) -> bool {
+    async fn cancel_all_order(&self) -> Result<bool, String> {
         unimplemented!()
     }
 

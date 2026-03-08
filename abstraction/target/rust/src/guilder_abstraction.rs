@@ -124,33 +124,33 @@ pub struct Fill {
 #[allow(async_fn_in_trait)]
 pub trait TestServer {
 	/// test ping
-	async fn ping(&self) -> bool;
+	async fn ping(&self) -> Result<bool, String>;
 	/// get server local time
-	async fn get_server_time(&self) -> i64;
+	async fn get_server_time(&self) -> Result<i64, String>;
 }
 
 /// get market data such as symbol, price and volume
 #[allow(async_fn_in_trait)]
 pub trait GetMarketData {
 	/// get symbol, such as BTCUSD
-	async fn get_symbol(&self) -> Vec<String>;
+	async fn get_symbol(&self) -> Result<Vec<String>, String>;
 	/// get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
-	async fn get_price(&self, symbol: String) -> f64;
+	async fn get_price(&self, symbol: String) -> Result<f64, String>;
 	/// get current open interest for a symbol
-	async fn get_open_interest(&self, symbol: String) -> f64;
+	async fn get_open_interest(&self, symbol: String) -> Result<f64, String>;
 }
 
 /// place, change, cancel order
 #[allow(async_fn_in_trait)]
 pub trait ManageOrder {
 	/// place order, return cloid
-	async fn place_order(&self, symbol: String, price: f64, volume: f64) -> i64;
+	async fn place_order(&self, symbol: String, price: f64, volume: f64) -> Result<i64, String>;
 	/// change order
-	async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> i64;
+	async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> Result<i64, String>;
 	/// cancel order by cloid
-	async fn cancel_order(&self, cloid: i64) -> i64;
+	async fn cancel_order(&self, cloid: i64) -> Result<i64, String>;
 	/// cancel all order regardless of cloid/symbol
-	async fn cancel_all_order(&self) -> bool;
+	async fn cancel_all_order(&self) -> Result<bool, String>;
 }
 
 /// subscribe to streaming market data

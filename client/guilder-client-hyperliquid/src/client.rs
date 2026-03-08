@@ -109,97 +109,92 @@ struct WsTrade {
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::TestServer for HyperliquidClient {
     /// Sends a lightweight allMids request; returns true if the server responds 200 OK.
-    async fn ping(&self) -> bool {
+    async fn ping(&self) -> Result<bool, String> {
         self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "allMids"}))
             .send()
             .await
             .map(|r| r.status().is_success())
-            .unwrap_or(false)
+            .map_err(|e| e.to_string())
     }
 
     /// Hyperliquid has no dedicated server-time endpoint; returns local UTC ms.
-    async fn get_server_time(&self) -> i64 {
-        std::time::SystemTime::now()
+    async fn get_server_time(&self) -> Result<i64, String> {
+        Ok(std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
-            .unwrap_or(0)
+            .unwrap_or(0))
     }
 }
 
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::GetMarketData for HyperliquidClient {
     /// Returns all perpetual asset names from Hyperliquid's meta endpoint.
-    async fn get_symbol(&self) -> Vec<String> {
-        let Ok(resp) = self.client
+    async fn get_symbol(&self) -> Result<Vec<String>, String> {
+        let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "meta"}))
             .send()
             .await
-        else {
-            return Vec::new();
-        };
+            .map_err(|e| e.to_string())?;
         resp.json::<MetaResponse>()
             .await
             .map(|r| r.universe.into_iter().map(|a| a.name).collect())
-            .unwrap_or_default()
+            .map_err(|e| e.to_string())
     }
 
     /// Returns the current open interest for `symbol` from metaAndAssetCtxs.
-    async fn get_open_interest(&self, symbol: String) -> f64 {
-        let Ok(resp) = self.client
+    async fn get_open_interest(&self, symbol: String) -> Result<f64, String> {
+        let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "metaAndAssetCtxs"}))
             .send()
             .await
-        else {
-            return 0.0;
-        };
-        let Ok((meta, ctxs)) = resp.json::<MetaAndAssetCtxsResponse>().await else {
-            return 0.0;
-        };
+            .map_err(|e| e.to_string())?;
+        let (meta, ctxs) = resp.json::<MetaAndAssetCtxsResponse>()
+            .await
+            .map_err(|e| e.to_string())?;
         meta.universe.iter()
             .position(|a| a.name == symbol)
             .and_then(|i| ctxs.get(i))
             .and_then(|ctx| ctx.open_interest.parse().ok())
-            .unwrap_or(0.0)
+            .ok_or_else(|| format!("symbol {} not found", symbol))
     }
 
     /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
-    async fn get_price(&self, symbol: String) -> f64 {
-        let Ok(resp) = self.client
+    async fn get_price(&self, symbol: String) -> Result<f64, String> {
+        let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "allMids"}))
             .send()
             .await
-        else {
-            return 0.0;
-        };
+            .map_err(|e| e.to_string())?;
         resp.json::<HashMap<String, String>>()
             .await
-            .ok()
-            .and_then(|mids| mids.get(&symbol).and_then(|s| s.parse().ok()))
-            .unwrap_or(0.0)
+            .map_err(|e| e.to_string())?
+            .get(&symbol)
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| format!("symbol {} not found", symbol))
     }
 }
 
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for HyperliquidClient {
-    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> i64 {
+    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> i64 {
+    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn cancel_order(&self, cloid: i64) -> i64 {
+    async fn cancel_order(&self, cloid: i64) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn cancel_all_order(&self) -> bool {
+    async fn cancel_all_order(&self) -> Result<bool, String> {
         unimplemented!()
     }
 }

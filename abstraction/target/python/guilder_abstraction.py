@@ -84,12 +84,12 @@ class Fill:
 class TestServer(ABC):
 	"""test server network connection"""
 	@abstractmethod
-	async def ping(self) -> bool:
+	async def ping(self) -> Result<bool, String>:
 		"""test ping"""
 		pass
 
 	@abstractmethod
-	async def get_server_time(self) -> int:
+	async def get_server_time(self) -> Result<i64, String>:
 		"""get server local time"""
 		pass
 
@@ -97,17 +97,17 @@ class TestServer(ABC):
 class GetMarketData(ABC):
 	"""get market data such as symbol, price and volume"""
 	@abstractmethod
-	async def get_symbol(self) -> list[str]:
+	async def get_symbol(self) -> Result<Vec<String>, String>:
 		"""get symbol, such as BTCUSD"""
 		pass
 
 	@abstractmethod
-	async def get_price(self, symbol: str) -> float:
+	async def get_price(self, symbol: str) -> Result<f64, String>:
 		"""get mid-price of a symbol (e.g. BTCUSD -> 67000.0)"""
 		pass
 
 	@abstractmethod
-	async def get_open_interest(self, symbol: str) -> float:
+	async def get_open_interest(self, symbol: str) -> Result<f64, String>:
 		"""get current open interest for a symbol"""
 		pass
 
@@ -115,22 +115,22 @@ class GetMarketData(ABC):
 class ManageOrder(ABC):
 	"""place, change, cancel order"""
 	@abstractmethod
-	async def place_order(self, symbol: str, price: float, volume: float) -> int:
+	async def place_order(self, symbol: str, price: float, volume: float) -> Result<i64, String>:
 		"""place order, return cloid"""
 		pass
 
 	@abstractmethod
-	async def change_order_by_cloid(self, cloid: int, price: float, volume: float) -> int:
+	async def change_order_by_cloid(self, cloid: int, price: float, volume: float) -> Result<i64, String>:
 		"""change order"""
 		pass
 
 	@abstractmethod
-	async def cancel_order(self, cloid: int) -> int:
+	async def cancel_order(self, cloid: int) -> Result<i64, String>:
 		"""cancel order by cloid"""
 		pass
 
 	@abstractmethod
-	async def cancel_all_order(self) -> bool:
+	async def cancel_all_order(self) -> Result<bool, String>:
 		"""cancel all order regardless of cloid/symbol"""
 		pass
 

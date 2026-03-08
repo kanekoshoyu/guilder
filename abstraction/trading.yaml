@@ -5,10 +5,10 @@ traits:
     methods:
       - name: ping
         description: test ping
-        return_type: bool
+        return_type: Result<bool, String>
       - name: get_server_time
         description: get server local time
-        return_type: i64
+        return_type: Result<i64, String>
 
   - name: GetMarketData
     description: get market data such as symbol, price and volume
@@ -16,16 +16,16 @@ traits:
     methods:
       - name: get_symbol
         description: get symbol, such as BTCUSD
-        return_type: Vec<String>
+        return_type: Result<Vec<String>, String>
       - name: get_price
         description: get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
-        return_type: f64
+        return_type: Result<f64, String>
         args:
           - name: symbol
             type: String
       - name: get_open_interest
         description: get current open interest for a symbol
-        return_type: f64
+        return_type: Result<f64, String>
         args:
           - name: symbol
             type: String
@@ -52,7 +52,7 @@ traits:
             type: f64
           - name: volume
             type: f64
-        return_type: i64
+        return_type: Result<i64, String>
       - name: change_order_by_cloid
         description: change order
         args:
@@ -62,16 +62,16 @@ traits:
             type: f64
           - name: volume
             type: f64
-        return_type: i64
+        return_type: Result<i64, String>
       - name: cancel_order
         description: cancel order by cloid
         args:
           - name: cloid
             type: i64
-        return_type: i64
+        return_type: Result<i64, String>
       - name: cancel_all_order
         description: cancel all order regardless of cloid/symbol
-        return_type: bool
+        return_type: Result<bool, String>
 
   - name: SubscribeMarketData
     description: subscribe to streaming market data
