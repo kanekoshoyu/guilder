@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, L2Update, Fill, Side, OrderSide};
+use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, Side, OrderSide};
 use futures_core::Stream;
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
@@ -32,6 +32,19 @@ struct AssetInfo {
     name: String,
 }
 
+/// Response from metaAndAssetCtxs: [meta, [ctx, ...]]
+type MetaAndAssetCtxsResponse = (MetaResponse, Vec<RestAssetCtx>);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+struct RestAssetCtx {
+    open_interest: String,
+    funding: String,
+    mark_px: String,
+    day_ntl_vlm: String,
+}
+
 // --- WebSocket envelope and data shapes ---
 
 #[derive(Deserialize)]
@@ -51,6 +64,34 @@ struct WsBook {
 struct WsLevel {
     px: String,
     sz: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WsAssetCtx {
+    coin: String,
+    ctx: WsPerpsCtx,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WsPerpsCtx {
+    open_interest: String,
+    funding: String,
+    mark_px: String,
+    day_ntl_vlm: String,
+}
+
+#[derive(Deserialize)]
+struct WsUserEvent {
+    liquidation: Option<WsLiquidation>,
+}
+
+#[derive(Deserialize)]
+struct WsLiquidation {
+    liquidated_user: String,
+    liquidated_ntl_pos: String,
+    liquidated_account_value: String,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +146,26 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .unwrap_or_default()
     }
 
+    /// Returns the current open interest for `symbol` from metaAndAssetCtxs.
+    async fn get_open_interest(&self, symbol: String) -> f64 {
+        let Ok(resp) = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "metaAndAssetCtxs"}))
+            .send()
+            .await
+        else {
+            return 0.0;
+        };
+        let Ok((meta, ctxs)) = resp.json::<MetaAndAssetCtxsResponse>().await else {
+            return 0.0;
+        };
+        meta.universe.iter()
+            .position(|a| a.name == symbol)
+            .and_then(|i| ctxs.get(i))
+            .and_then(|ctx| ctx.open_interest.parse().ok())
+            .unwrap_or(0.0)
+    }
+
     /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
     async fn get_price(&self, symbol: String) -> f64 {
         let Ok(resp) = self.client
@@ -126,11 +187,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for HyperliquidClient {
-    async fn place_order(&self, symbol: String, price: i32, volume: i32) -> i64 {
+    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> i64 {
         unimplemented!()
     }
 
-    async fn change_order_by_cloid(&self, cloid: i64, price: i32, volume: i32) -> i64 {
+    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> i64 {
         unimplemented!()
     }
 
@@ -175,6 +236,59 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
         }
     }
 
+    /// Streams asset context updates for `symbol` via Hyperliquid's `activeAssetCtx` subscription.
+    /// Each message carries OI, funding rate, mark price, and 24h notional volume.
+    fn subscribe_asset_context(&self, symbol: String) -> impl Stream<Item = AssetContext> {
+        async_stream::stream! {
+            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
+            let sub = serde_json::json!({
+                "method": "subscribe",
+                "subscription": {"type": "activeAssetCtx", "coin": symbol}
+            });
+            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
+
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
+                if env.channel != "activeAssetCtx" { continue; }
+                let Ok(update) = serde_json::from_value::<WsAssetCtx>(env.data) else { continue; };
+                let ctx = &update.ctx;
+                if let (Ok(open_interest), Ok(funding_rate), Ok(mark_price), Ok(day_volume)) = (
+                    ctx.open_interest.parse(),
+                    ctx.funding.parse(),
+                    ctx.mark_px.parse(),
+                    ctx.day_ntl_vlm.parse(),
+                ) {
+                    yield AssetContext { symbol: update.coin, open_interest, funding_rate, mark_price, day_volume };
+                }
+            }
+        }
+    }
+
+    /// Streams liquidation events for a user address via Hyperliquid's `userEvents` subscription.
+    fn subscribe_liquidation(&self, user: String) -> impl Stream<Item = Liquidation> {
+        async_stream::stream! {
+            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
+            let sub = serde_json::json!({
+                "method": "subscribe",
+                "subscription": {"type": "userEvents", "user": user}
+            });
+            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
+
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
+                if env.channel != "userEvents" { continue; }
+                let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { continue; };
+                let Some(liq) = event.liquidation else { continue; };
+                if let (Ok(notional_position), Ok(account_value)) = (
+                    liq.liquidated_ntl_pos.parse(),
+                    liq.liquidated_account_value.parse(),
+                ) {
+                    yield Liquidation { liquidated_user: liq.liquidated_user, notional_position, account_value };
+                }
+            }
+        }
+    }
+
     /// Streams public trade fills for `symbol`. Maps to Hyperliquid's `trades` subscription.
     /// `side` reflects the aggressor: "B" (buyer) → `Side::Bid`, otherwise → `Side::Ask`.
     fn subscribe_fill(&self, symbol: String) -> impl Stream<Item = Fill> {
@@ -194,7 +308,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                 for trade in trades {
                     let side = if trade.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
                     if let (Ok(price), Ok(volume)) = (trade.px.parse(), trade.sz.parse()) {
-                        yield Fill { symbol: trade.coin, price, volume, side, timestamp: trade.time, trade_id: trade.tid };
+                        yield Fill { symbol: trade.coin, price, volume, side, timestamp_ms: trade.time, trade_id: trade.tid };
                     }
                 }
             }

@@ -23,6 +23,12 @@ traits:
         args:
           - name: symbol
             type: String
+      - name: get_open_interest
+        description: get current open interest for a symbol
+        return_type: f64
+        args:
+          - name: symbol
+            type: String
   # TODO define get_ohlcv,
   # first check what is the common API
   # and then see if we can map this with yaml
@@ -43,9 +49,9 @@ traits:
           - name: symbol
             type: String
           - name: price
-            type: i32
+            type: f64
           - name: volume
-            type: i32
+            type: f64
         return_type: i64
       - name: change_order_by_cloid
         description: change order
@@ -53,9 +59,9 @@ traits:
           - name: cloid
             type: i64
           - name: price
-            type: i32
+            type: f64
           - name: volume
-            type: i32
+            type: f64
         return_type: i64
       - name: cancel_order
         description: cancel order by cloid
@@ -82,6 +88,18 @@ traits:
         return_type: Stream<Fill>
         args:
           - name: symbol
+            type: String
+      - name: subscribe_asset_context
+        description: subscribe to asset context updates (OI, funding rate, mark price, 24h volume)
+        return_type: Stream<AssetContext>
+        args:
+          - name: symbol
+            type: String
+      - name: subscribe_liquidation
+        description: subscribe to liquidation events for a user address
+        return_type: Stream<Liquidation>
+        args:
+          - name: user
             type: String
 
 # enum: keep it primitive
@@ -175,6 +193,30 @@ structs:
       - name: sequence
         type: i64
 
+  - name: Liquidation
+    description: "forced liquidation event for a user"
+    values:
+      - name: liquidated_user
+        type: String
+      - name: notional_position
+        type: f64
+      - name: account_value
+        type: f64
+
+  - name: AssetContext
+    description: "snapshot of key market metrics for an asset"
+    values:
+      - name: symbol
+        type: String
+      - name: open_interest
+        type: f64
+      - name: funding_rate
+        type: f64
+      - name: mark_price
+        type: f64
+      - name: day_volume
+        type: f64
+
   - name: Fill
     description: "market trade/fill event"
     values:
@@ -186,7 +228,7 @@ structs:
         type: f64
       - name: side
         type: OrderSide
-      - name: timestamp
+      - name: timestamp_ms
         type: i64
       - name: trade_id
         type: i64

@@ -77,6 +77,13 @@ legend: ✅ complete, 🚧 partial, ❌ not started
 1. ~~**`Fill.side` wrong type**~~ — fixed: `Fill.side` is now `OrderSide` (Buy/Sell); Hyperliquid `"B"` → `Buy`, `"A"` → `Sell`.
 2. ~~**`Fill` missing trade ID**~~ — fixed: `tid: i64` added to `Fill`.
 3. ~~**L2 snapshot boundary not signalled**~~ — fixed: `sequence: i64` added to `L2Update`. All levels in the same snapshot share the same value; a sequence change signals a new snapshot.
+4. ~~**`ManageOrder` uses `i32` for price and volume**~~ — fixed: `price` and `volume` are now `f64` in `place_order` and `change_order_by_cloid`.
+5. ~~**`Fill.timestamp` untyped**~~ — fixed: renamed to `timestamp_ms` (Unix milliseconds).
+6. ~~**Missing data: open interest**~~ — fixed: `get_open_interest(symbol) -> f64` added to `GetMarketData`; `subscribe_asset_context(symbol) -> Stream<AssetContext>` added to `SubscribeMarketData`. `AssetContext` carries OI, funding rate, mark price, and 24h volume.
+7. ~~**Missing data: liquidations**~~ — fixed: `Liquidation` struct added; `subscribe_liquidation(user) -> Stream<Liquidation>` added to `SubscribeMarketData`. Takes a user address (Hyperliquid's `userEvents` is per-address, not per-symbol).
+8. ~~**Missing data: 24h volume**~~ — fixed: covered by `AssetContext.day_volume` from `subscribe_asset_context`.
+9. **No `Result` on trait methods** — bare return values (`bool`, `f64`, `i64`) can't distinguish a failed request from a zero/false result. Needs an error type strategy (blocked by design constraint: no external types in abstraction).
+10. **`SubscribeMarketData` is not object-safe** — `impl Stream` return type prevents `Box<dyn SubscribeMarketData>`. Every call site must be monomorphised. Needs architectural decision (e.g. return `Pin<Box<dyn Stream>>` instead).
 
 ## Design constraints
 

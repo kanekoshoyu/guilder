@@ -55,14 +55,30 @@ class L2Update:
 		self.side = side
 		self.sequence = sequence
 
+class Liquidation:
+	"""forced liquidation event for a user"""
+	def __init__(self, liquidated_user: str, notional_position: float, account_value: float):
+		self.liquidated_user = liquidated_user
+		self.notional_position = notional_position
+		self.account_value = account_value
+
+class AssetContext:
+	"""snapshot of key market metrics for an asset"""
+	def __init__(self, symbol: str, open_interest: float, funding_rate: float, mark_price: float, day_volume: float):
+		self.symbol = symbol
+		self.open_interest = open_interest
+		self.funding_rate = funding_rate
+		self.mark_price = mark_price
+		self.day_volume = day_volume
+
 class Fill:
 	"""market trade/fill event"""
-	def __init__(self, symbol: str, price: float, volume: float, side: OrderSide, timestamp: int, trade_id: int):
+	def __init__(self, symbol: str, price: float, volume: float, side: OrderSide, timestamp_ms: int, trade_id: int):
 		self.symbol = symbol
 		self.price = price
 		self.volume = volume
 		self.side = side
-		self.timestamp = timestamp
+		self.timestamp_ms = timestamp_ms
 		self.trade_id = trade_id
 
 class TestServer(ABC):
@@ -90,16 +106,21 @@ class GetMarketData(ABC):
 		"""get mid-price of a symbol (e.g. BTCUSD -> 67000.0)"""
 		pass
 
+	@abstractmethod
+	async def get_open_interest(self, symbol: str) -> float:
+		"""get current open interest for a symbol"""
+		pass
+
 
 class ManageOrder(ABC):
 	"""place, change, cancel order"""
 	@abstractmethod
-	async def place_order(self, symbol: str, price: int, volume: int) -> int:
+	async def place_order(self, symbol: str, price: float, volume: float) -> int:
 		"""place order, return cloid"""
 		pass
 
 	@abstractmethod
-	async def change_order_by_cloid(self, cloid: int, price: int, volume: int) -> int:
+	async def change_order_by_cloid(self, cloid: int, price: float, volume: float) -> int:
 		"""change order"""
 		pass
 
@@ -124,6 +145,16 @@ class SubscribeMarketData(ABC):
 	@abstractmethod
 	async def subscribe_fill(self, symbol: str) -> AsyncIterator[Fill]:
 		"""subscribe to market fill events for a symbol"""
+		pass
+
+	@abstractmethod
+	async def subscribe_asset_context(self, symbol: str) -> AsyncIterator[AssetContext]:
+		"""subscribe to asset context updates (OI, funding rate, mark price, 24h volume)"""
+		pass
+
+	@abstractmethod
+	async def subscribe_liquidation(self, user: str) -> AsyncIterator[Liquidation]:
+		"""subscribe to liquidation events for a user address"""
 		pass
 
 
