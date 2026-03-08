@@ -98,6 +98,7 @@ enum ValueType {
     U128,
     F32,
     F64,
+    Decimal,
     Bool,
     Char,
     #[serde(rename = "String")]
@@ -138,6 +139,7 @@ impl ValueType {
                 Self::U128 => "u128".into(),
                 Self::F32 => "f32".into(),
                 Self::F64 => "f64".into(),
+                Self::Decimal => "Decimal".into(),
                 Self::Bool => "bool".into(),
                 Self::Char => "char".into(),
                 Self::String => "String".into(),
@@ -172,6 +174,7 @@ impl ValueType {
                 | Self::U64
                 | Self::U128 => "int".into(),
                 Self::F32 | Self::F64 => "float".into(),
+                Self::Decimal => "str".into(),
                 Self::Bool => "bool".into(),
                 Self::Char | Self::String => "str".into(),
                 Self::Unit => "None".to_string(),
@@ -284,6 +287,7 @@ fn parse_value_type(value: &str) -> Result<ValueType, String> {
             "u128" => Ok(ValueType::U128),
             "f32" => Ok(ValueType::F32),
             "f64" => Ok(ValueType::F64),
+            "Decimal" => Ok(ValueType::Decimal),
             "bool" => Ok(ValueType::Bool),
             "char" => Ok(ValueType::Char),
             "String" => Ok(ValueType::String),
@@ -297,6 +301,15 @@ fn parse_yaml(file_path: impl AsRef<std::path::Path>) -> YamlConfig {
     let file_content = std::fs::read_to_string(file_path).expect("Failed to read YAML file");
     let config: YamlConfig = serde_yaml::from_str(&file_content).expect("Failed to parse YAML");
     config
+}
+
+fn uses_decimal(vt: &ValueType) -> bool {
+    match vt {
+        ValueType::Decimal => true,
+        ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => uses_decimal(inner),
+        ValueType::Map { key_type, value_type } => uses_decimal(key_type) || uses_decimal(value_type),
+        _ => false,
+    }
 }
 
 fn codegen_str_rust(config: YamlConfig) -> String {
@@ -321,6 +334,13 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     let has_stream = config.traits.iter().any(|tr| {
         tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
     });
+    let has_decimal = config.structs.iter().any(|s| s.values.iter().any(|v| uses_decimal(&v.value_type)))
+        || config.traits.iter().any(|tr| tr.methods.iter().any(|m| {
+            uses_decimal(&m.return_type) || m.args.iter().any(|a| uses_decimal(&a.arg_type))
+        }));
+    if has_decimal {
+        code.push_str("use rust_decimal::Decimal;\n");
+    }
     if has_stream {
         code.push_str("use std::pin::Pin;\n");
         code.push_str("use futures_core::Stream;\n");

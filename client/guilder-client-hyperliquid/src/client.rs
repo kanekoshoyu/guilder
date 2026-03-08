@@ -1,9 +1,11 @@
 use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream, Side, OrderSide};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::str::FromStr;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const HYPERLIQUID_INFO_URL: &str = "https://api.hyperliquid.xyz/info";
@@ -103,6 +105,10 @@ struct WsTrade {
     tid: i64,
 }
 
+fn parse_decimal(s: &str) -> Option<Decimal> {
+    Decimal::from_str(s).ok()
+}
+
 // --- Trait implementations ---
 
 #[allow(async_fn_in_trait)]
@@ -144,7 +150,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     }
 
     /// Returns the current open interest for `symbol` from metaAndAssetCtxs.
-    async fn get_open_interest(&self, symbol: String) -> Result<f64, String> {
+    async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String> {
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "metaAndAssetCtxs"}))
@@ -157,12 +163,12 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
         meta.universe.iter()
             .position(|a| a.name == symbol)
             .and_then(|i| ctxs.get(i))
-            .and_then(|ctx| ctx.open_interest.parse().ok())
+            .and_then(|ctx| parse_decimal(&ctx.open_interest))
             .ok_or_else(|| format!("symbol {} not found", symbol))
     }
 
     /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
-    async fn get_price(&self, symbol: String) -> Result<f64, String> {
+    async fn get_price(&self, symbol: String) -> Result<Decimal, String> {
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "allMids"}))
@@ -173,7 +179,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .await
             .map_err(|e| e.to_string())?
             .get(&symbol)
-            .and_then(|s| s.parse().ok())
+            .and_then(|s| parse_decimal(s))
             .ok_or_else(|| format!("symbol {} not found", symbol))
     }
 }
@@ -181,11 +187,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for HyperliquidClient {
-    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> Result<i64, String> {
+    async fn place_order(&self, symbol: String, price: Decimal, volume: Decimal) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> Result<i64, String> {
+    async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String> {
         unimplemented!()
     }
 
@@ -202,6 +208,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     /// Streams L2 orderbook updates for `symbol`. Each message from Hyperliquid is a
     /// full-depth snapshot; every level is emitted as an individual `L2Update` event.
+    /// All levels in the same snapshot share the same `sequence` value.
     fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update> {
         Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
@@ -217,12 +224,12 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                 let Ok(book) = serde_json::from_value::<WsBook>(env.data) else { continue; };
 
                 for level in book.levels.first().into_iter().flatten() {
-                    if let (Ok(price), Ok(volume)) = (level.px.parse(), level.sz.parse()) {
+                    if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
                         yield L2Update { symbol: book.coin.clone(), price, volume, side: Side::Ask, sequence: book.time };
                     }
                 }
                 for level in book.levels.get(1).into_iter().flatten() {
-                    if let (Ok(price), Ok(volume)) = (level.px.parse(), level.sz.parse()) {
+                    if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
                         yield L2Update { symbol: book.coin.clone(), price, volume, side: Side::Bid, sequence: book.time };
                     }
                 }
@@ -246,11 +253,11 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                 if env.channel != "activeAssetCtx" { continue; }
                 let Ok(update) = serde_json::from_value::<WsAssetCtx>(env.data) else { continue; };
                 let ctx = &update.ctx;
-                if let (Ok(open_interest), Ok(funding_rate), Ok(mark_price), Ok(day_volume)) = (
-                    ctx.open_interest.parse(),
-                    ctx.funding.parse(),
-                    ctx.mark_px.parse(),
-                    ctx.day_ntl_vlm.parse(),
+                if let (Some(open_interest), Some(funding_rate), Some(mark_price), Some(day_volume)) = (
+                    parse_decimal(&ctx.open_interest),
+                    parse_decimal(&ctx.funding),
+                    parse_decimal(&ctx.mark_px),
+                    parse_decimal(&ctx.day_ntl_vlm),
                 ) {
                     yield AssetContext { symbol: update.coin, open_interest, funding_rate, mark_price, day_volume };
                 }
@@ -259,6 +266,8 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     }
 
     /// Streams liquidation events for a user address via Hyperliquid's `userEvents` subscription.
+    /// Note: Hyperliquid's liquidation event is account-level; `symbol` is set to empty string
+    /// and `side` defaults to `OrderSide::Sell` as the data source does not provide per-position detail.
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation> {
         Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
@@ -273,11 +282,17 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                 if env.channel != "userEvents" { continue; }
                 let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { continue; };
                 let Some(liq) = event.liquidation else { continue; };
-                if let (Ok(notional_position), Ok(account_value)) = (
-                    liq.liquidated_ntl_pos.parse(),
-                    liq.liquidated_account_value.parse(),
+                if let (Some(notional_position), Some(account_value)) = (
+                    parse_decimal(&liq.liquidated_ntl_pos),
+                    parse_decimal(&liq.liquidated_account_value),
                 ) {
-                    yield Liquidation { liquidated_user: liq.liquidated_user, notional_position, account_value };
+                    yield Liquidation {
+                        symbol: String::new(),
+                        side: OrderSide::Sell,
+                        liquidated_user: liq.liquidated_user,
+                        notional_position,
+                        account_value,
+                    };
                 }
             }
         })
@@ -301,7 +316,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
 
                 for trade in trades {
                     let side = if trade.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
-                    if let (Ok(price), Ok(volume)) = (trade.px.parse(), trade.sz.parse()) {
+                    if let (Some(price), Some(volume)) = (parse_decimal(&trade.px), parse_decimal(&trade.sz)) {
                         yield Fill { symbol: trade.coin, price, volume, side, timestamp_ms: trade.time, trade_id: trade.tid };
                     }
                 }

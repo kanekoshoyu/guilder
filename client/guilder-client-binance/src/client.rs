@@ -1,6 +1,7 @@
 use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream};
 use futures_util::stream;
 use reqwest::Client;
+use rust_decimal::Decimal;
 
 pub struct BinanceClient {
     client: Client,
@@ -31,11 +32,11 @@ impl guilder_abstraction::GetMarketData for BinanceClient {
         unimplemented!()
     }
 
-    async fn get_price(&self, symbol: String) -> Result<f64, String> {
+    async fn get_price(&self, symbol: String) -> Result<Decimal, String> {
         unimplemented!()
     }
 
-    async fn get_open_interest(&self, symbol: String) -> Result<f64, String> {
+    async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String> {
         unimplemented!()
     }
 }
@@ -43,11 +44,11 @@ impl guilder_abstraction::GetMarketData for BinanceClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for BinanceClient {
-    async fn place_order(&self, symbol: String, price: f64, volume: f64) -> Result<i64, String> {
+    async fn place_order(&self, symbol: String, price: Decimal, volume: Decimal) -> Result<i64, String> {
         unimplemented!()
     }
 
-    async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> Result<i64, String> {
+    async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String> {
         unimplemented!()
     }
 

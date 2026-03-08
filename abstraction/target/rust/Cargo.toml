@@ -9,3 +9,4 @@ license = "MIT"
 
 [dependencies]
 futures-core = { workspace = true }
+rust_decimal = "1"

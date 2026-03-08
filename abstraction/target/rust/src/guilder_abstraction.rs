@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use std::pin::Pin;
 use futures_core::Stream;
 
@@ -88,8 +89,8 @@ pub enum AssetClass {
 #[derive(Debug, Clone)]
 pub struct L2Update {
 	pub symbol: String,
-	pub price: f64,
-	pub volume: f64,
+	pub price: Decimal,
+	pub volume: Decimal,
 	pub side: Side,
 	pub sequence: i64,
 }
@@ -97,27 +98,29 @@ pub struct L2Update {
 /// forced liquidation event for a user
 #[derive(Debug, Clone)]
 pub struct Liquidation {
+	pub symbol: String,
+	pub side: OrderSide,
 	pub liquidated_user: String,
-	pub notional_position: f64,
-	pub account_value: f64,
+	pub notional_position: Decimal,
+	pub account_value: Decimal,
 }
 
 /// snapshot of key market metrics for an asset
 #[derive(Debug, Clone)]
 pub struct AssetContext {
 	pub symbol: String,
-	pub open_interest: f64,
-	pub funding_rate: f64,
-	pub mark_price: f64,
-	pub day_volume: f64,
+	pub open_interest: Decimal,
+	pub funding_rate: Decimal,
+	pub mark_price: Decimal,
+	pub day_volume: Decimal,
 }
 
 /// market trade/fill event
 #[derive(Debug, Clone)]
 pub struct Fill {
 	pub symbol: String,
-	pub price: f64,
-	pub volume: f64,
+	pub price: Decimal,
+	pub volume: Decimal,
 	pub side: OrderSide,
 	pub timestamp_ms: i64,
 	pub trade_id: i64,
@@ -138,18 +141,18 @@ pub trait GetMarketData {
 	/// get symbol, such as BTCUSD
 	async fn get_symbol(&self) -> Result<Vec<String>, String>;
 	/// get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
-	async fn get_price(&self, symbol: String) -> Result<f64, String>;
+	async fn get_price(&self, symbol: String) -> Result<Decimal, String>;
 	/// get current open interest for a symbol
-	async fn get_open_interest(&self, symbol: String) -> Result<f64, String>;
+	async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String>;
 }
 
 /// place, change, cancel order
 #[allow(async_fn_in_trait)]
 pub trait ManageOrder {
 	/// place order, return cloid
-	async fn place_order(&self, symbol: String, price: f64, volume: f64) -> Result<i64, String>;
+	async fn place_order(&self, symbol: String, price: Decimal, volume: Decimal) -> Result<i64, String>;
 	/// change order
-	async fn change_order_by_cloid(&self, cloid: i64, price: f64, volume: f64) -> Result<i64, String>;
+	async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String>;
 	/// cancel order by cloid
 	async fn cancel_order(&self, cloid: i64) -> Result<i64, String>;
 	/// cancel all order regardless of cloid/symbol

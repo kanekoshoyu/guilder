@@ -48,7 +48,7 @@ class AssetClass(Enum):
 
 class L2Update:
 	"""single L2 orderbook price level update"""
-	def __init__(self, symbol: str, price: float, volume: float, side: Side, sequence: int):
+	def __init__(self, symbol: str, price: str, volume: str, side: Side, sequence: int):
 		self.symbol = symbol
 		self.price = price
 		self.volume = volume
@@ -57,14 +57,16 @@ class L2Update:
 
 class Liquidation:
 	"""forced liquidation event for a user"""
-	def __init__(self, liquidated_user: str, notional_position: float, account_value: float):
+	def __init__(self, symbol: str, side: OrderSide, liquidated_user: str, notional_position: str, account_value: str):
+		self.symbol = symbol
+		self.side = side
 		self.liquidated_user = liquidated_user
 		self.notional_position = notional_position
 		self.account_value = account_value
 
 class AssetContext:
 	"""snapshot of key market metrics for an asset"""
-	def __init__(self, symbol: str, open_interest: float, funding_rate: float, mark_price: float, day_volume: float):
+	def __init__(self, symbol: str, open_interest: str, funding_rate: str, mark_price: str, day_volume: str):
 		self.symbol = symbol
 		self.open_interest = open_interest
 		self.funding_rate = funding_rate
@@ -73,7 +75,7 @@ class AssetContext:
 
 class Fill:
 	"""market trade/fill event"""
-	def __init__(self, symbol: str, price: float, volume: float, side: OrderSide, timestamp_ms: int, trade_id: int):
+	def __init__(self, symbol: str, price: str, volume: str, side: OrderSide, timestamp_ms: int, trade_id: int):
 		self.symbol = symbol
 		self.price = price
 		self.volume = volume
@@ -102,12 +104,12 @@ class GetMarketData(ABC):
 		pass
 
 	@abstractmethod
-	async def get_price(self, symbol: str) -> Result<f64, String>:
+	async def get_price(self, symbol: str) -> Result<Decimal, String>:
 		"""get mid-price of a symbol (e.g. BTCUSD -> 67000.0)"""
 		pass
 
 	@abstractmethod
-	async def get_open_interest(self, symbol: str) -> Result<f64, String>:
+	async def get_open_interest(self, symbol: str) -> Result<Decimal, String>:
 		"""get current open interest for a symbol"""
 		pass
 
@@ -115,12 +117,12 @@ class GetMarketData(ABC):
 class ManageOrder(ABC):
 	"""place, change, cancel order"""
 	@abstractmethod
-	async def place_order(self, symbol: str, price: float, volume: float) -> Result<i64, String>:
+	async def place_order(self, symbol: str, price: str, volume: str) -> Result<i64, String>:
 		"""place order, return cloid"""
 		pass
 
 	@abstractmethod
-	async def change_order_by_cloid(self, cloid: int, price: float, volume: float) -> Result<i64, String>:
+	async def change_order_by_cloid(self, cloid: int, price: str, volume: str) -> Result<i64, String>:
 		"""change order"""
 		pass
 

@@ -19,25 +19,19 @@ traits:
         return_type: Result<Vec<String>, String>
       - name: get_price
         description: get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
-        return_type: Result<f64, String>
+        return_type: Result<Decimal, String>
         args:
           - name: symbol
             type: String
       - name: get_open_interest
         description: get current open interest for a symbol
-        return_type: Result<f64, String>
+        return_type: Result<Decimal, String>
         args:
           - name: symbol
             type: String
   # TODO define get_ohlcv,
   # first check what is the common API
   # and then see if we can map this with yaml
-  # - name: get_ohlcv
-  # return_type: String # return type I assume is a little more complex
-  # - name: get_ohlcv
-  #   return_type: String
-  #   args:
-  #     - name: name
 
   - name: ManageOrder
     description: place, change, cancel order
@@ -49,9 +43,9 @@ traits:
           - name: symbol
             type: String
           - name: price
-            type: f64
+            type: Decimal
           - name: volume
-            type: f64
+            type: Decimal
         return_type: Result<i64, String>
       - name: change_order_by_cloid
         description: change order
@@ -59,9 +53,9 @@ traits:
           - name: cloid
             type: i64
           - name: price
-            type: f64
+            type: Decimal
           - name: volume
-            type: f64
+            type: Decimal
         return_type: Result<i64, String>
       - name: cancel_order
         description: cancel order by cloid
@@ -185,9 +179,9 @@ structs:
       - name: symbol
         type: String
       - name: price
-        type: f64
+        type: Decimal
       - name: volume
-        type: f64
+        type: Decimal
       - name: side
         type: Side
       - name: sequence
@@ -196,12 +190,16 @@ structs:
   - name: Liquidation
     description: "forced liquidation event for a user"
     values:
+      - name: symbol
+        type: String
+      - name: side
+        type: OrderSide
       - name: liquidated_user
         type: String
       - name: notional_position
-        type: f64
+        type: Decimal
       - name: account_value
-        type: f64
+        type: Decimal
 
   - name: AssetContext
     description: "snapshot of key market metrics for an asset"
@@ -209,13 +207,13 @@ structs:
       - name: symbol
         type: String
       - name: open_interest
-        type: f64
+        type: Decimal
       - name: funding_rate
-        type: f64
+        type: Decimal
       - name: mark_price
-        type: f64
+        type: Decimal
       - name: day_volume
-        type: f64
+        type: Decimal
 
   - name: Fill
     description: "market trade/fill event"
@@ -223,9 +221,9 @@ structs:
       - name: symbol
         type: String
       - name: price
-        type: f64
+        type: Decimal
       - name: volume
-        type: f64
+        type: Decimal
       - name: side
         type: OrderSide
       - name: timestamp_ms
