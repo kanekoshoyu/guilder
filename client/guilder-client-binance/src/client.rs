@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream};
+use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream, OrderSide, OrderType, TimeInForce, OrderPlacement, Position, OpenOrder, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
 use futures_util::stream;
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -44,7 +44,7 @@ impl guilder_abstraction::GetMarketData for BinanceClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for BinanceClient {
-    async fn place_order(&self, symbol: String, price: Decimal, volume: Decimal) -> Result<i64, String> {
+    async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce) -> Result<OrderPlacement, String> {
         unimplemented!()
     }
 
@@ -77,6 +77,46 @@ impl guilder_abstraction::SubscribeMarketData for BinanceClient {
     }
 
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation> {
+        Box::pin(stream::pending())
+    }
+}
+
+#[allow(unused_variables)]
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::GetAccountSnapshot for BinanceClient {
+    async fn get_positions(&self) -> Result<Vec<Position>, String> {
+        unimplemented!()
+    }
+
+    async fn get_open_orders(&self) -> Result<Vec<OpenOrder>, String> {
+        unimplemented!()
+    }
+
+    async fn get_collateral(&self) -> Result<Decimal, String> {
+        unimplemented!()
+    }
+}
+
+#[allow(unused_variables)]
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::SubscribeUserEvents for BinanceClient {
+    fn subscribe_user_fills(&self) -> BoxStream<UserFill> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_order_updates(&self) -> BoxStream<OrderUpdate> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_funding_payments(&self) -> BoxStream<FundingPayment> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_deposits(&self) -> BoxStream<Deposit> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_withdrawals(&self) -> BoxStream<Withdrawal> {
         Box::pin(stream::pending())
     }
 }

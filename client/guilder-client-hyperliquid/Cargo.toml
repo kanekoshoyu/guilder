@@ -1,6 +1,6 @@
 [package]
 name = "guilder-client-hyperliquid"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Hyperliquid client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -10,7 +10,7 @@ license = "MIT"
 [dependencies]
 # development: path, deployment: version
 # guilder-abstraction = { path = "../../abstraction/target/rust" }
-guilder-abstraction = "0.1.5"
+guilder-abstraction = "0.1.6"
 reqwest = { workspace = true, features = ["json"] }
 futures-core.workspace = true
 futures-util = "0.3"

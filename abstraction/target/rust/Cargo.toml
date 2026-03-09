@@ -1,6 +1,6 @@
 [package]
 name = "guilder-abstraction"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "multi-exchange crypto trading trait"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]

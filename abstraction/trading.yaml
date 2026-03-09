@@ -6,6 +6,7 @@ traits:
       - name: ping
         description: test ping
         return_type: Result<bool, String>
+
       - name: get_server_time
         description: get server local time
         return_type: Result<i64, String>
@@ -17,36 +18,42 @@ traits:
       - name: get_symbol
         description: get symbol, such as BTCUSD
         return_type: Result<Vec<String>, String>
+
       - name: get_price
         description: get mid-price of a symbol (e.g. BTCUSD -> 67000.0)
         return_type: Result<Decimal, String>
         args:
           - name: symbol
             type: String
+
       - name: get_open_interest
         description: get current open interest for a symbol
         return_type: Result<Decimal, String>
         args:
           - name: symbol
             type: String
-  # TODO define get_ohlcv,
-  # first check what is the common API
-  # and then see if we can map this with yaml
 
   - name: ManageOrder
     description: place, change, cancel order
     async: true
     methods:
       - name: place_order
-        description: place order, return cloid
+        description: place order
         args:
           - name: symbol
             type: String
+          - name: side
+            type: OrderSide
           - name: price
             type: Decimal
           - name: volume
             type: Decimal
-        return_type: Result<i64, String>
+          - name: order_type
+            type: OrderType
+          - name: time_in_force
+            type: TimeInForce
+        return_type: Result<OrderPlacement, String>
+
       - name: change_order_by_cloid
         description: change order
         args:
@@ -57,12 +64,14 @@ traits:
           - name: volume
             type: Decimal
         return_type: Result<i64, String>
+
       - name: cancel_order
         description: cancel order by cloid
         args:
           - name: cloid
             type: i64
         return_type: Result<i64, String>
+
       - name: cancel_all_order
         description: cancel all order regardless of cloid/symbol
         return_type: Result<bool, String>
@@ -77,18 +86,21 @@ traits:
         args:
           - name: symbol
             type: String
+
       - name: subscribe_fill
         description: subscribe to market fill events for a symbol
         return_type: Stream<Fill>
         args:
           - name: symbol
             type: String
+
       - name: subscribe_asset_context
         description: subscribe to asset context updates (OI, funding rate, mark price, 24h volume)
         return_type: Stream<AssetContext>
         args:
           - name: symbol
             type: String
+
       - name: subscribe_liquidation
         description: subscribe to liquidation events for a user address
         return_type: Stream<Liquidation>
@@ -96,85 +108,137 @@ traits:
           - name: user
             type: String
 
-# enum: keep it primitive
+  - name: GetAccountSnapshot
+    description: query authenticated account snapshot
+    async: true
+    methods:
+      - name: get_positions
+        description: get current open positions
+        return_type: Result<Vec<Position>, String>
+
+      - name: get_open_orders
+        description: get currently resting orders
+        return_type: Result<Vec<OpenOrder>, String>
+
+      - name: get_collateral
+        description: get available account collateral
+        return_type: Result<Decimal, String>
+
+  - name: SubscribeUserEvents
+    description: subscribe to authenticated user account events
+    async: true
+    methods:
+      - name: subscribe_user_fills
+        description: stream executions of the user's own orders
+        return_type: Stream<UserFill>
+
+      - name: subscribe_order_updates
+        description: stream order lifecycle updates
+        return_type: Stream<OrderUpdate>
+
+      - name: subscribe_funding_payments
+        description: stream funding payments applied to positions
+        return_type: Stream<FundingPayment>
+
+      - name: subscribe_deposits
+        description: stream account deposit events
+        return_type: Stream<Deposit>
+
+      - name: subscribe_withdrawals
+        description: stream account withdrawal events
+        return_type: Stream<Withdrawal>
+
+
 enums:
   - name: Status
     values:
       - name: Success
-        description: "The task is pending."
+        description: task succeeded
       - name: InProgress
-        description: "The task is currently in progress."
+        description: task currently in progress
       - name: Completed
-        description: "The task has been completed."
+        description: task completed
       - name: Failed
-        description: "The task has failed."
+        description: task failed
 
   - name: Side
-    description: "orderbook side"
+    description: orderbook side
     values:
       - name: Bid
-        description: "bid side of the orderbook"
+        description: bid side
       - name: Ask
-        description: "ask side of the orderbook"
+        description: ask side
 
   - name: OrderSide
-    description: "direction of an order"
+    description: direction of an order
     values:
       - name: Buy
-        description: "buy order"
+        description: buy order
       - name: Sell
-        description: "sell order"
+        description: sell order
+
+  - name: OrderStatus
+    description: lifecycle state of an order
+    values:
+      - name: Placed
+        description: order accepted by exchange
+      - name: PartiallyFilled
+        description: order partially filled
+      - name: Filled
+        description: order fully filled
+      - name: Cancelled
+        description: order cancelled
 
   - name: MarketType
-    description: "type of market"
+    description: type of market
     values:
       - name: Spot
-        description: "spot market"
+        description: spot market
       - name: Future
-        description: "dated futures contract"
+        description: dated futures
       - name: Perpetual
-        description: "perpetual futures contract"
+        description: perpetual futures
 
   - name: OrderType
-    description: "order execution type"
+    description: order execution type
     values:
       - name: Market
-        description: "execute immediately at best available price"
+        description: execute immediately
       - name: Limit
-        description: "execute at specified price or better"
+        description: execute at specified price
 
   - name: TimeInForce
-    description: "how long an order remains active"
+    description: how long an order remains active
     values:
       - name: Gtc
-        description: "good till cancel"
+        description: good till cancel
       - name: Ioc
-        description: "immediate or cancel"
+        description: immediate or cancel
       - name: Fok
-        description: "fill or kill"
+        description: fill or kill
 
   - name: VolumeDenomination
-    description: "which currency the volume is expressed in"
+    description: which currency the volume is expressed in
     values:
       - name: Base
-        description: "volume in base currency (e.g. BTC in BTC-USDT)"
+        description: base currency
       - name: Quote
-        description: "volume in quote currency (e.g. USDT in BTC-USDT)"
+        description: quote currency
 
   - name: AssetClass
-    description: "broad class of an asset"
+    description: broad class of asset
     values:
       - name: Crypto
-        description: "non-stable cryptocurrency"
+        description: cryptocurrency
       - name: Stablecoin
-        description: "price-stable cryptocurrency"
+        description: stablecoin
       - name: Fiat
-        description: "government-issued currency"
+        description: fiat currency
 
-# struct: either primitive or enum
+
 structs:
   - name: L2Update
-    description: "single L2 orderbook price level update"
+    description: single L2 orderbook price level update
     values:
       - name: symbol
         type: String
@@ -188,7 +252,7 @@ structs:
         type: i64
 
   - name: Liquidation
-    description: "forced liquidation event for a user"
+    description: forced liquidation event
     values:
       - name: symbol
         type: String
@@ -202,7 +266,7 @@ structs:
         type: Decimal
 
   - name: AssetContext
-    description: "snapshot of key market metrics for an asset"
+    description: snapshot of market metrics
     values:
       - name: symbol
         type: String
@@ -216,7 +280,7 @@ structs:
         type: Decimal
 
   - name: Fill
-    description: "market trade/fill event"
+    description: market trade event
     values:
       - name: symbol
         type: String
@@ -229,4 +293,106 @@ structs:
       - name: timestamp_ms
         type: i64
       - name: trade_id
+        type: i64
+
+  - name: Position
+    description: open trading position
+    values:
+      - name: symbol
+        type: String
+      - name: side
+        type: OrderSide
+      - name: size
+        type: Decimal
+      - name: entry_price
+        type: Decimal
+
+  - name: OpenOrder
+    description: resting order
+    values:
+      - name: order_id
+        type: i64
+      - name: symbol
+        type: String
+      - name: side
+        type: OrderSide
+      - name: price
+        type: Decimal
+      - name: quantity
+        type: Decimal
+      - name: filled_quantity
+        type: Decimal
+
+  - name: OrderPlacement
+    description: order placement response
+    values:
+      - name: order_id
+        type: i64
+      - name: symbol
+        type: String
+      - name: side
+        type: OrderSide
+      - name: price
+        type: Decimal
+      - name: quantity
+        type: Decimal
+      - name: timestamp_ms
+        type: i64
+
+  - name: UserFill
+    description: execution of the user's own order
+    values:
+      - name: order_id
+        type: i64
+      - name: symbol
+        type: String
+      - name: side
+        type: OrderSide
+      - name: price
+        type: Decimal
+      - name: quantity
+        type: Decimal
+      - name: timestamp_ms
+        type: i64
+
+  - name: OrderUpdate
+    description: order lifecycle update
+    values:
+      - name: order_id
+        type: i64
+      - name: symbol
+        type: String
+      - name: status
+        type: OrderStatus
+      - name: timestamp_ms
+        type: i64
+
+  - name: FundingPayment
+    description: funding payment applied to a position
+    values:
+      - name: symbol
+        type: String
+      - name: amount_usdc
+        type: Decimal
+      - name: timestamp_ms
+        type: i64
+
+  - name: Deposit
+    description: deposit event
+    values:
+      - name: asset
+        type: String
+      - name: amount
+        type: Decimal
+      - name: timestamp_ms
+        type: i64
+
+  - name: Withdrawal
+    description: withdrawal event
+    values:
+      - name: asset
+        type: String
+      - name: amount
+        type: Decimal
+      - name: timestamp_ms
         type: i64

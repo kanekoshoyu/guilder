@@ -6,22 +6,22 @@ pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
-	/// The task is pending.
+	/// task succeeded
 	Success,
-	/// The task is currently in progress.
+	/// task currently in progress
 	InProgress,
-	/// The task has been completed.
+	/// task completed
 	Completed,
-	/// The task has failed.
+	/// task failed
 	Failed,
 }
 
 /// orderbook side
 #[derive(Debug, Clone, PartialEq)]
 pub enum Side {
-	/// bid side of the orderbook
+	/// bid side
 	Bid,
-	/// ask side of the orderbook
+	/// ask side
 	Ask,
 }
 
@@ -34,23 +34,36 @@ pub enum OrderSide {
 	Sell,
 }
 
+/// lifecycle state of an order
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderStatus {
+	/// order accepted by exchange
+	Placed,
+	/// order partially filled
+	PartiallyFilled,
+	/// order fully filled
+	Filled,
+	/// order cancelled
+	Cancelled,
+}
+
 /// type of market
 #[derive(Debug, Clone, PartialEq)]
 pub enum MarketType {
 	/// spot market
 	Spot,
-	/// dated futures contract
+	/// dated futures
 	Future,
-	/// perpetual futures contract
+	/// perpetual futures
 	Perpetual,
 }
 
 /// order execution type
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrderType {
-	/// execute immediately at best available price
+	/// execute immediately
 	Market,
-	/// execute at specified price or better
+	/// execute at specified price
 	Limit,
 }
 
@@ -68,20 +81,20 @@ pub enum TimeInForce {
 /// which currency the volume is expressed in
 #[derive(Debug, Clone, PartialEq)]
 pub enum VolumeDenomination {
-	/// volume in base currency (e.g. BTC in BTC-USDT)
+	/// base currency
 	Base,
-	/// volume in quote currency (e.g. USDT in BTC-USDT)
+	/// quote currency
 	Quote,
 }
 
-/// broad class of an asset
+/// broad class of asset
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssetClass {
-	/// non-stable cryptocurrency
+	/// cryptocurrency
 	Crypto,
-	/// price-stable cryptocurrency
+	/// stablecoin
 	Stablecoin,
-	/// government-issued currency
+	/// fiat currency
 	Fiat,
 }
 
@@ -95,7 +108,7 @@ pub struct L2Update {
 	pub sequence: i64,
 }
 
-/// forced liquidation event for a user
+/// forced liquidation event
 #[derive(Debug, Clone)]
 pub struct Liquidation {
 	pub symbol: String,
@@ -105,7 +118,7 @@ pub struct Liquidation {
 	pub account_value: Decimal,
 }
 
-/// snapshot of key market metrics for an asset
+/// snapshot of market metrics
 #[derive(Debug, Clone)]
 pub struct AssetContext {
 	pub symbol: String,
@@ -115,7 +128,7 @@ pub struct AssetContext {
 	pub day_volume: Decimal,
 }
 
-/// market trade/fill event
+/// market trade event
 #[derive(Debug, Clone)]
 pub struct Fill {
 	pub symbol: String,
@@ -124,6 +137,81 @@ pub struct Fill {
 	pub side: OrderSide,
 	pub timestamp_ms: i64,
 	pub trade_id: i64,
+}
+
+/// open trading position
+#[derive(Debug, Clone)]
+pub struct Position {
+	pub symbol: String,
+	pub side: OrderSide,
+	pub size: Decimal,
+	pub entry_price: Decimal,
+}
+
+/// resting order
+#[derive(Debug, Clone)]
+pub struct OpenOrder {
+	pub order_id: i64,
+	pub symbol: String,
+	pub side: OrderSide,
+	pub price: Decimal,
+	pub quantity: Decimal,
+	pub filled_quantity: Decimal,
+}
+
+/// order placement response
+#[derive(Debug, Clone)]
+pub struct OrderPlacement {
+	pub order_id: i64,
+	pub symbol: String,
+	pub side: OrderSide,
+	pub price: Decimal,
+	pub quantity: Decimal,
+	pub timestamp_ms: i64,
+}
+
+/// execution of the user's own order
+#[derive(Debug, Clone)]
+pub struct UserFill {
+	pub order_id: i64,
+	pub symbol: String,
+	pub side: OrderSide,
+	pub price: Decimal,
+	pub quantity: Decimal,
+	pub timestamp_ms: i64,
+}
+
+/// order lifecycle update
+#[derive(Debug, Clone)]
+pub struct OrderUpdate {
+	pub order_id: i64,
+	pub symbol: String,
+	pub status: OrderStatus,
+	pub timestamp_ms: i64,
+}
+
+/// funding payment applied to a position
+#[derive(Debug, Clone)]
+pub struct FundingPayment {
+	pub symbol: String,
+	pub amount_usdc: Decimal,
+	pub timestamp_ms: i64,
+}
+
+/// deposit event
+#[derive(Debug, Clone)]
+pub struct Deposit {
+	pub asset: String,
+	pub amount: Decimal,
+	pub timestamp_ms: i64,
+}
+
+/// withdrawal event
+#[derive(Debug, Clone)]
+pub struct Withdrawal {
+	pub asset: String,
+	pub amount: Decimal,
+	pub timestamp_ms: i64,
 }
 
 /// test server network connection
@@ -149,8 +237,8 @@ pub trait GetMarketData {
 /// place, change, cancel order
 #[allow(async_fn_in_trait)]
 pub trait ManageOrder {
-	/// place order, return cloid
-	async fn place_order(&self, symbol: String, price: Decimal, volume: Decimal) -> Result<i64, String>;
+	/// place order
+	async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce) -> Result<OrderPlacement, String>;
 	/// change order
 	async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String>;
 	/// cancel order by cloid
@@ -170,5 +258,31 @@ pub trait SubscribeMarketData {
 	fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext>;
 	/// subscribe to liquidation events for a user address
 	fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation>;
+}
+
+/// query authenticated account snapshot
+#[allow(async_fn_in_trait)]
+pub trait GetAccountSnapshot {
+	/// get current open positions
+	async fn get_positions(&self) -> Result<Vec<Position>, String>;
+	/// get currently resting orders
+	async fn get_open_orders(&self) -> Result<Vec<OpenOrder>, String>;
+	/// get available account collateral
+	async fn get_collateral(&self) -> Result<Decimal, String>;
+}
+
+/// subscribe to authenticated user account events
+#[allow(async_fn_in_trait)]
+pub trait SubscribeUserEvents {
+	/// stream executions of the user's own orders
+	fn subscribe_user_fills(&self) -> BoxStream<UserFill>;
+	/// stream order lifecycle updates
+	fn subscribe_order_updates(&self) -> BoxStream<OrderUpdate>;
+	/// stream funding payments applied to positions
+	fn subscribe_funding_payments(&self) -> BoxStream<FundingPayment>;
+	/// stream account deposit events
+	fn subscribe_deposits(&self) -> BoxStream<Deposit>;
+	/// stream account withdrawal events
+	fn subscribe_withdrawals(&self) -> BoxStream<Withdrawal>;
 }
 

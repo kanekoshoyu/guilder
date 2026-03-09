@@ -18,6 +18,13 @@ class OrderSide(Enum):
 	Buy = 1
 	Sell = 2
 
+class OrderStatus(Enum):
+	"""lifecycle state of an order"""
+	Placed = 1
+	PartiallyFilled = 2
+	Filled = 3
+	Cancelled = 4
+
 class MarketType(Enum):
 	"""type of market"""
 	Spot = 1
@@ -41,7 +48,7 @@ class VolumeDenomination(Enum):
 	Quote = 2
 
 class AssetClass(Enum):
-	"""broad class of an asset"""
+	"""broad class of asset"""
 	Crypto = 1
 	Stablecoin = 2
 	Fiat = 3
@@ -56,7 +63,7 @@ class L2Update:
 		self.sequence = sequence
 
 class Liquidation:
-	"""forced liquidation event for a user"""
+	"""forced liquidation event"""
 	def __init__(self, symbol: str, side: OrderSide, liquidated_user: str, notional_position: str, account_value: str):
 		self.symbol = symbol
 		self.side = side
@@ -65,7 +72,7 @@ class Liquidation:
 		self.account_value = account_value
 
 class AssetContext:
-	"""snapshot of key market metrics for an asset"""
+	"""snapshot of market metrics"""
 	def __init__(self, symbol: str, open_interest: str, funding_rate: str, mark_price: str, day_volume: str):
 		self.symbol = symbol
 		self.open_interest = open_interest
@@ -74,7 +81,7 @@ class AssetContext:
 		self.day_volume = day_volume
 
 class Fill:
-	"""market trade/fill event"""
+	"""market trade event"""
 	def __init__(self, symbol: str, price: str, volume: str, side: OrderSide, timestamp_ms: int, trade_id: int):
 		self.symbol = symbol
 		self.price = price
@@ -82,6 +89,73 @@ class Fill:
 		self.side = side
 		self.timestamp_ms = timestamp_ms
 		self.trade_id = trade_id
+
+class Position:
+	"""open trading position"""
+	def __init__(self, symbol: str, side: OrderSide, size: str, entry_price: str):
+		self.symbol = symbol
+		self.side = side
+		self.size = size
+		self.entry_price = entry_price
+
+class OpenOrder:
+	"""resting order"""
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, filled_quantity: str):
+		self.order_id = order_id
+		self.symbol = symbol
+		self.side = side
+		self.price = price
+		self.quantity = quantity
+		self.filled_quantity = filled_quantity
+
+class OrderPlacement:
+	"""order placement response"""
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int):
+		self.order_id = order_id
+		self.symbol = symbol
+		self.side = side
+		self.price = price
+		self.quantity = quantity
+		self.timestamp_ms = timestamp_ms
+
+class UserFill:
+	"""execution of the user's own order"""
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int):
+		self.order_id = order_id
+		self.symbol = symbol
+		self.side = side
+		self.price = price
+		self.quantity = quantity
+		self.timestamp_ms = timestamp_ms
+
+class OrderUpdate:
+	"""order lifecycle update"""
+	def __init__(self, order_id: int, symbol: str, status: OrderStatus, timestamp_ms: int):
+		self.order_id = order_id
+		self.symbol = symbol
+		self.status = status
+		self.timestamp_ms = timestamp_ms
+
+class FundingPayment:
+	"""funding payment applied to a position"""
+	def __init__(self, symbol: str, amount_usdc: str, timestamp_ms: int):
+		self.symbol = symbol
+		self.amount_usdc = amount_usdc
+		self.timestamp_ms = timestamp_ms
+
+class Deposit:
+	"""deposit event"""
+	def __init__(self, asset: str, amount: str, timestamp_ms: int):
+		self.asset = asset
+		self.amount = amount
+		self.timestamp_ms = timestamp_ms
+
+class Withdrawal:
+	"""withdrawal event"""
+	def __init__(self, asset: str, amount: str, timestamp_ms: int):
+		self.asset = asset
+		self.amount = amount
+		self.timestamp_ms = timestamp_ms
 
 class TestServer(ABC):
 	"""test server network connection"""
@@ -117,8 +191,8 @@ class GetMarketData(ABC):
 class ManageOrder(ABC):
 	"""place, change, cancel order"""
 	@abstractmethod
-	async def place_order(self, symbol: str, price: str, volume: str) -> Result<i64, String>:
-		"""place order, return cloid"""
+	async def place_order(self, symbol: str, side: OrderSide, price: str, volume: str, order_type: OrderType, time_in_force: TimeInForce) -> Result<OrderPlacement, String>:
+		"""place order"""
 		pass
 
 	@abstractmethod
@@ -157,6 +231,52 @@ class SubscribeMarketData(ABC):
 	@abstractmethod
 	async def subscribe_liquidation(self, user: str) -> AsyncIterator[Liquidation]:
 		"""subscribe to liquidation events for a user address"""
+		pass
+
+
+class GetAccountSnapshot(ABC):
+	"""query authenticated account snapshot"""
+	@abstractmethod
+	async def get_positions(self) -> Result<Vec<Position>, String>:
+		"""get current open positions"""
+		pass
+
+	@abstractmethod
+	async def get_open_orders(self) -> Result<Vec<OpenOrder>, String>:
+		"""get currently resting orders"""
+		pass
+
+	@abstractmethod
+	async def get_collateral(self) -> Result<Decimal, String>:
+		"""get available account collateral"""
+		pass
+
+
+class SubscribeUserEvents(ABC):
+	"""subscribe to authenticated user account events"""
+	@abstractmethod
+	async def subscribe_user_fills(self) -> AsyncIterator[UserFill]:
+		"""stream executions of the user's own orders"""
+		pass
+
+	@abstractmethod
+	async def subscribe_order_updates(self) -> AsyncIterator[OrderUpdate]:
+		"""stream order lifecycle updates"""
+		pass
+
+	@abstractmethod
+	async def subscribe_funding_payments(self) -> AsyncIterator[FundingPayment]:
+		"""stream funding payments applied to positions"""
+		pass
+
+	@abstractmethod
+	async def subscribe_deposits(self) -> AsyncIterator[Deposit]:
+		"""stream account deposit events"""
+		pass
+
+	@abstractmethod
+	async def subscribe_withdrawals(self) -> AsyncIterator[Withdrawal]:
+		"""stream account withdrawal events"""
 		pass
 
 
