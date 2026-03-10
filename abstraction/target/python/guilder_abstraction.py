@@ -192,6 +192,11 @@ class GetMarketData(ABC):
 		"""get current open interest for a symbol"""
 		pass
 
+	@abstractmethod
+	async def get_asset_context(self, symbol: str) -> Result<AssetContext, String>:
+		"""get snapshot of market metrics (OI, funding rate, mark price, 24h volume)"""
+		pass
+
 
 class ManageOrder(ABC):
 	"""place, change, cancel order"""

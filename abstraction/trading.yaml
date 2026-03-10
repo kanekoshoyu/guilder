@@ -33,6 +33,13 @@ traits:
           - name: symbol
             type: String
 
+      - name: get_asset_context
+        description: get snapshot of market metrics (OI, funding rate, mark price, 24h volume)
+        return_type: Result<AssetContext, String>
+        args:
+          - name: symbol
+            type: String
+
   - name: ManageOrder
     description: place, change, cancel order
     async: true

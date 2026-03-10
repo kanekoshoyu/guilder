@@ -237,6 +237,8 @@ pub trait GetMarketData {
 	async fn get_price(&self, symbol: String) -> Result<Decimal, String>;
 	/// get current open interest for a symbol
 	async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String>;
+	/// get snapshot of market metrics (OI, funding rate, mark price, 24h volume)
+	async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String>;
 }
 
 /// place, change, cancel order

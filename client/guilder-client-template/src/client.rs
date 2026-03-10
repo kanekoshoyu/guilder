@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, L2Update, Fill, AssetContext, Liquidation, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, L2Update, Fill, AssetContext, Liquidation, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -37,6 +37,10 @@ impl guilder_abstraction::GetMarketData for ExchangeClient {
     }
 
     async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String> {
+        Err("not implemented".to_string())
+    }
+
+    async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String> {
         Err("not implemented".to_string())
     }
 
