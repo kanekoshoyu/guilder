@@ -167,6 +167,30 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .ok_or_else(|| format!("symbol {} not found", symbol))
     }
 
+    /// Returns a full AssetContext snapshot for `symbol` from metaAndAssetCtxs.
+    async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String> {
+        let resp = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "metaAndAssetCtxs"}))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let (meta, ctxs) = resp.json::<MetaAndAssetCtxsResponse>()
+            .await
+            .map_err(|e| e.to_string())?;
+        let idx = meta.universe.iter()
+            .position(|a| a.name == symbol)
+            .ok_or_else(|| format!("symbol {} not found", symbol))?;
+        let ctx = ctxs.get(idx).ok_or_else(|| format!("symbol {} not found", symbol))?;
+        Ok(AssetContext {
+            symbol,
+            open_interest: parse_decimal(&ctx.open_interest).ok_or("invalid open_interest")?,
+            funding_rate: parse_decimal(&ctx.funding).ok_or("invalid funding")?,
+            mark_price: parse_decimal(&ctx.mark_px).ok_or("invalid mark_px")?,
+            day_volume: parse_decimal(&ctx.day_ntl_vlm).ok_or("invalid day_ntl_vlm")?,
+        })
+    }
+
     /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
     async fn get_price(&self, symbol: String) -> Result<Decimal, String> {
         let resp = self.client

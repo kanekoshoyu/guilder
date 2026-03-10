@@ -8,6 +8,7 @@ members = [
 ]
 exclude = [
     "client/guilder-client-template", # codegen template, not a real crate
+    "client/.claude", # claude code config directory
 ]
 
 [workspace.dependencies]
