@@ -352,6 +352,8 @@ structs:
         type: Decimal
       - name: quantity
         type: Decimal
+      - name: fee_usd
+        type: Decimal
       - name: timestamp_ms
         type: i64
 
@@ -364,6 +366,14 @@ structs:
         type: String
       - name: status
         type: OrderStatus
+      - name: side
+        type: Option<OrderSide>
+      - name: price
+        type: Option<Decimal>
+      - name: quantity
+        type: Option<Decimal>
+      - name: remaining_quantity
+        type: Option<Decimal>
       - name: timestamp_ms
         type: i64
 
@@ -372,7 +382,7 @@ structs:
     values:
       - name: symbol
         type: String
-      - name: amount_usdc
+      - name: amount_usd
         type: Decimal
       - name: timestamp_ms
         type: i64
@@ -382,7 +392,7 @@ structs:
     values:
       - name: asset
         type: String
-      - name: amount
+      - name: amount_usd
         type: Decimal
       - name: timestamp_ms
         type: i64
@@ -392,7 +402,7 @@ structs:
     values:
       - name: asset
         type: String
-      - name: amount
+      - name: amount_usd
         type: Decimal
       - name: timestamp_ms
         type: i64

@@ -594,7 +594,7 @@ fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
             let args_str = args.join(", ");
             let is_streaming = matches!(method.return_type, ValueType::Stream(_));
             let fn_keyword = if tr.r#async && !is_streaming { "async fn" } else { "fn" };
-            let body = if is_streaming { "Box::pin(stream::pending())" } else { "unimplemented!()" };
+            let body = if is_streaming { "Box::pin(stream::empty())" } else { "Err(\"not implemented\".to_string())" };
             code.push_str(&format!(
                 "    {} {}({}) -> {} {{\n        {}\n    }}\n\n",
                 fn_keyword,
