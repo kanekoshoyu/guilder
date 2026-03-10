@@ -406,6 +406,8 @@ checksum = "40ecd4077b5ae9fd2e9e169b102c6c330d0605168eb0e8bf79952b256dbefffd"
 [[package]]
 name = "guilder-abstraction"
 version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c50008fe35226b631d635dc0e926566fe30d6c14891eff8d23e014550f5adad"
 dependencies = [
  "futures-core",
  "rust_decimal",
@@ -413,9 +415,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-abstraction"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c50008fe35226b631d635dc0e926566fe30d6c14891eff8d23e014550f5adad"
+version = "0.1.8"
 dependencies = [
  "futures-core",
  "rust_decimal",
@@ -435,7 +435,7 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
- "guilder-abstraction 0.1.6",
+ "guilder-abstraction 0.1.8",
  "reqwest",
  "rust_decimal",
 ]
@@ -447,7 +447,7 @@ dependencies = [
  "async-stream",
  "futures-core",
  "futures-util",
- "guilder-abstraction 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "guilder-abstraction 0.1.6",
  "reqwest",
  "rust_decimal",
  "serde",
@@ -460,7 +460,7 @@ dependencies = [
 name = "guilder-core"
 version = "0.1.0"
 dependencies = [
- "guilder-abstraction 0.1.6",
+ "guilder-abstraction 0.1.8",
  "ordered-float",
 ]
 
