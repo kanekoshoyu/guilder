@@ -120,41 +120,46 @@ class OrderPlacement:
 
 class UserFill:
 	"""execution of the user's own order"""
-	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int):
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, fee_usd: str, timestamp_ms: int):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.side = side
 		self.price = price
 		self.quantity = quantity
+		self.fee_usd = fee_usd
 		self.timestamp_ms = timestamp_ms
 
 class OrderUpdate:
 	"""order lifecycle update"""
-	def __init__(self, order_id: int, symbol: str, status: OrderStatus, timestamp_ms: int):
+	def __init__(self, order_id: int, symbol: str, status: OrderStatus, side: Option<OrderSide>, price: Option<Decimal>, quantity: Option<Decimal>, remaining_quantity: Option<Decimal>, timestamp_ms: int):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.status = status
+		self.side = side
+		self.price = price
+		self.quantity = quantity
+		self.remaining_quantity = remaining_quantity
 		self.timestamp_ms = timestamp_ms
 
 class FundingPayment:
 	"""funding payment applied to a position"""
-	def __init__(self, symbol: str, amount_usdc: str, timestamp_ms: int):
+	def __init__(self, symbol: str, amount_usd: str, timestamp_ms: int):
 		self.symbol = symbol
-		self.amount_usdc = amount_usdc
+		self.amount_usd = amount_usd
 		self.timestamp_ms = timestamp_ms
 
 class Deposit:
 	"""deposit event"""
-	def __init__(self, asset: str, amount: str, timestamp_ms: int):
+	def __init__(self, asset: str, amount_usd: str, timestamp_ms: int):
 		self.asset = asset
-		self.amount = amount
+		self.amount_usd = amount_usd
 		self.timestamp_ms = timestamp_ms
 
 class Withdrawal:
 	"""withdrawal event"""
-	def __init__(self, asset: str, amount: str, timestamp_ms: int):
+	def __init__(self, asset: str, amount_usd: str, timestamp_ms: int):
 		self.asset = asset
-		self.amount = amount
+		self.amount_usd = amount_usd
 		self.timestamp_ms = timestamp_ms
 
 class TestServer(ABC):

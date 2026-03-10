@@ -178,6 +178,7 @@ pub struct UserFill {
 	pub side: OrderSide,
 	pub price: Decimal,
 	pub quantity: Decimal,
+	pub fee_usd: Decimal,
 	pub timestamp_ms: i64,
 }
 
@@ -187,6 +188,10 @@ pub struct OrderUpdate {
 	pub order_id: i64,
 	pub symbol: String,
 	pub status: OrderStatus,
+	pub side: Option<OrderSide>,
+	pub price: Option<Decimal>,
+	pub quantity: Option<Decimal>,
+	pub remaining_quantity: Option<Decimal>,
 	pub timestamp_ms: i64,
 }
 
@@ -194,7 +199,7 @@ pub struct OrderUpdate {
 #[derive(Debug, Clone)]
 pub struct FundingPayment {
 	pub symbol: String,
-	pub amount_usdc: Decimal,
+	pub amount_usd: Decimal,
 	pub timestamp_ms: i64,
 }
 
@@ -202,7 +207,7 @@ pub struct FundingPayment {
 #[derive(Debug, Clone)]
 pub struct Deposit {
 	pub asset: String,
-	pub amount: Decimal,
+	pub amount_usd: Decimal,
 	pub timestamp_ms: i64,
 }
 
@@ -210,7 +215,7 @@ pub struct Deposit {
 #[derive(Debug, Clone)]
 pub struct Withdrawal {
 	pub asset: String,
-	pub amount: Decimal,
+	pub amount_usd: Decimal,
 	pub timestamp_ms: i64,
 }
 
