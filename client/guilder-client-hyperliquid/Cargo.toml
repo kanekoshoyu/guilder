@@ -1,6 +1,6 @@
 [package]
 name = "guilder-client-hyperliquid"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Hyperliquid client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -20,3 +20,7 @@ rust_decimal = "1"
 tokio.workspace = true
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 async-stream = "0.3"
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
+hex = "0.4"
+rmp-serde = "1"
