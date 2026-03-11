@@ -13,6 +13,11 @@ const HYPERLIQUID_INFO_URL: &str = "https://api.hyperliquid.xyz/info";
 const HYPERLIQUID_EXCHANGE_URL: &str = "https://api.hyperliquid.xyz/exchange";
 const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
+async fn parse_response<T: for<'de> serde::Deserialize<'de>>(resp: reqwest::Response) -> Result<T, String> {
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|e| format!("{e}: {text}"))
+}
+
 pub struct HyperliquidClient {
     client: Client,
     user_address: Option<Address>,
@@ -45,7 +50,7 @@ impl HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let meta: MetaResponse = resp.json().await.map_err(|e| e.to_string())?;
+        let meta: MetaResponse = parse_response(resp).await?;
         meta.universe.iter()
             .position(|a| a.name == symbol)
             .ok_or_else(|| format!("symbol {} not found", symbol))
@@ -74,7 +79,7 @@ impl HyperliquidClient {
             .await
             .map_err(|e| e.to_string())?;
 
-        let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+        let body: Value = parse_response(resp).await?;
         if body["status"].as_str() == Some("err") {
             return Err(body["response"].as_str().unwrap_or("unknown error").to_string());
         }
@@ -378,10 +383,8 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        resp.json::<MetaResponse>()
-            .await
+        parse_response::<MetaResponse>(resp).await
             .map(|r| r.universe.into_iter().map(|a| a.name).collect())
-            .map_err(|e| e.to_string())
     }
 
     /// Returns the current open interest for `symbol` from metaAndAssetCtxs.
@@ -392,9 +395,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let (meta, ctxs) = resp.json::<MetaAndAssetCtxsResponse>()
-            .await
-            .map_err(|e| e.to_string())?;
+        let (meta, ctxs) = parse_response::<MetaAndAssetCtxsResponse>(resp).await?;
         meta.universe.iter()
             .position(|a| a.name == symbol)
             .and_then(|i| ctxs.get(i))
@@ -410,9 +411,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let (meta, ctxs) = resp.json::<MetaAndAssetCtxsResponse>()
-            .await
-            .map_err(|e| e.to_string())?;
+        let (meta, ctxs) = parse_response::<MetaAndAssetCtxsResponse>(resp).await?;
         let idx = meta.universe.iter()
             .position(|a| a.name == symbol)
             .ok_or_else(|| format!("symbol {} not found", symbol))?;
@@ -434,9 +433,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        resp.json::<HashMap<String, String>>()
-            .await
-            .map_err(|e| e.to_string())?
+        parse_response::<HashMap<String, String>>(resp).await?
             .get(&symbol)
             .and_then(|s| parse_decimal(s))
             .ok_or_else(|| format!("symbol {} not found", symbol))
@@ -500,7 +497,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let orders: Vec<RestOpenOrder> = resp.json().await.map_err(|e| e.to_string())?;
+        let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders.iter()
             .find(|o| o.oid == cloid)
             .ok_or_else(|| format!("order {} not found", cloid))?;
@@ -538,7 +535,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let orders: Vec<RestOpenOrder> = resp.json().await.map_err(|e| e.to_string())?;
+        let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders.iter()
             .find(|o| o.oid == cloid)
             .ok_or_else(|| format!("order {} not found", cloid))?;
@@ -564,7 +561,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let orders: Vec<RestOpenOrder> = resp.json().await.map_err(|e| e.to_string())?;
+        let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         if orders.is_empty() {
             return Ok(true);
         }
@@ -575,7 +572,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let meta: MetaResponse = meta_resp.json().await.map_err(|e| e.to_string())?;
+        let meta: MetaResponse = parse_response(meta_resp).await?;
 
         let cancels: Vec<Value> = orders.iter()
             .filter_map(|o| {
@@ -720,7 +717,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let state: ClearinghouseStateResponse = resp.json().await.map_err(|e| e.to_string())?;
+        let state: ClearinghouseStateResponse = parse_response(resp).await?;
 
         Ok(state.asset_positions.into_iter()
             .filter_map(|ap| {
@@ -744,7 +741,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let orders: Vec<RestOpenOrder> = resp.json().await.map_err(|e| e.to_string())?;
+        let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
 
         Ok(orders.into_iter()
             .filter_map(|o| {
@@ -767,7 +764,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let state: ClearinghouseStateResponse = resp.json().await.map_err(|e| e.to_string())?;
+        let state: ClearinghouseStateResponse = parse_response(resp).await?;
         parse_decimal(&state.margin_summary.account_value)
             .ok_or_else(|| "invalid account value".to_string())
     }
