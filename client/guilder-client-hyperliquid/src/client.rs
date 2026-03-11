@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream, Side, OrderSide, OrderStatus, OrderType, TimeInForce, OrderPlacement, Position, OpenOrder, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
 use futures_util::{stream, SinkExt, StreamExt};
 use reqwest::Client;
@@ -14,7 +15,7 @@ const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
 pub struct HyperliquidClient {
     client: Client,
-    user_address: Option<String>,
+    user_address: Option<Address>,
     private_key: Option<String>,
 }
 
@@ -23,12 +24,14 @@ impl HyperliquidClient {
         HyperliquidClient { client: Client::new(), user_address: None, private_key: None }
     }
 
-    pub fn with_auth(user_address: String, private_key: String) -> Self {
+    pub fn with_auth(user_address: Address, private_key: String) -> Self {
         HyperliquidClient { client: Client::new(), user_address: Some(user_address), private_key: Some(private_key) }
     }
 
-    fn require_user_address(&self) -> Result<&str, String> {
-        self.user_address.as_deref().ok_or_else(|| "user address required: use HyperliquidClient::with_auth".to_string())
+    fn require_user_address(&self) -> Result<String, String> {
+        self.user_address
+            .map(|a| format!("{:#x}", a))
+            .ok_or_else(|| "user address required: use HyperliquidClient::with_auth".to_string())
     }
 
     fn require_private_key(&self) -> Result<&str, String> {
@@ -237,6 +240,26 @@ struct WsOrderInfo {
     sz: String,
     oid: i64,
     orig_sz: String,
+}
+
+// --- WebSocket ledger update shapes (deposits / withdrawals) ---
+
+#[derive(Deserialize)]
+struct WsLedgerUpdates {
+    updates: Vec<WsLedgerEntry>,
+}
+
+#[derive(Deserialize)]
+struct WsLedgerEntry {
+    time: i64,
+    delta: WsLedgerDelta,
+}
+
+#[derive(Deserialize)]
+struct WsLedgerDelta {
+    #[serde(rename = "type")]
+    kind: String,
+    usdc: Option<String>,
 }
 
 // --- Helpers ---
@@ -469,7 +492,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
     /// Modifies price and size of an existing order by its order ID. Requires `with_auth`.
     /// Fetches the order's current coin and side before submitting the modify action.
     async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String> {
-        let user = self.require_user_address()?.to_string();
+        let user = self.require_user_address()?;
 
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
@@ -507,7 +530,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
     /// Cancels a single order by its order ID. Requires `with_auth`.
     /// Fetches open orders to resolve the coin/asset before cancelling.
     async fn cancel_order(&self, cloid: i64) -> Result<i64, String> {
-        let user = self.require_user_address()?.to_string();
+        let user = self.require_user_address()?;
 
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
@@ -533,7 +556,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
     /// Cancels all open orders. Requires `with_auth`.
     /// Fetches all open orders and submits a batch cancel in a single signed request.
     async fn cancel_all_order(&self) -> Result<bool, String> {
-        let user = self.require_user_address()?.to_string();
+        let user = self.require_user_address()?;
 
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
@@ -690,7 +713,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
     /// Returns open positions from `clearinghouseState`. Requires `with_auth`.
     /// Zero-size positions are filtered out. Positive `szi` = long, negative = short.
     async fn get_positions(&self) -> Result<Vec<Position>, String> {
-        let user = self.require_user_address()?.to_string();
+        let user = self.require_user_address()?;
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "clearinghouseState", "user": user}))
@@ -714,7 +737,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
     /// Returns resting orders from Hyperliquid's `openOrders` endpoint. Requires `with_auth`.
     /// `filled_quantity` is derived as `origSz - sz` (original size minus remaining size).
     async fn get_open_orders(&self) -> Result<Vec<OpenOrder>, String> {
-        let user = self.require_user_address()?.to_string();
+        let user = self.require_user_address()?;
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "openOrders", "user": user}))
@@ -737,7 +760,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
     /// Returns total account value (collateral) from `clearinghouseState`. Requires `with_auth`.
     async fn get_collateral(&self) -> Result<Decimal, String> {
-        let user = self.require_user_address()?.to_string();
+        let user = self.require_user_address()?;
         let resp = self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&serde_json::json!({"type": "clearinghouseState", "user": user}))
@@ -755,7 +778,8 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     /// Streams the user's own order executions via the `userEvents` WS subscription.
     /// Requires `with_auth` (streams are empty if no user address is set).
     fn subscribe_user_fills(&self) -> BoxStream<UserFill> {
-        let Some(user) = self.user_address.clone() else { return Box::pin(stream::empty()); };
+        let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
+        let user = format!("{:#x}", addr);
         Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
@@ -785,7 +809,8 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     /// Streams order lifecycle events via the `orderUpdates` WS subscription.
     /// Requires `with_auth`.
     fn subscribe_order_updates(&self) -> BoxStream<OrderUpdate> {
-        let Some(user) = self.user_address.clone() else { return Box::pin(stream::empty()); };
+        let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
+        let user = format!("{:#x}", addr);
         Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
@@ -824,7 +849,8 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     /// Streams funding payments applied to positions via the `userEvents` WS subscription.
     /// Requires `with_auth`.
     fn subscribe_funding_payments(&self) -> BoxStream<FundingPayment> {
-        let Some(user) = self.user_address.clone() else { return Box::pin(stream::empty()); };
+        let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
+        let user = format!("{:#x}", addr);
         Box::pin(async_stream::stream! {
             let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
             let sub = serde_json::json!({
@@ -845,13 +871,53 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
         })
     }
 
-    /// Hyperliquid does not expose real-time deposit events via WebSocket; returns an empty stream.
     fn subscribe_deposits(&self) -> BoxStream<Deposit> {
-        Box::pin(stream::empty())
+        let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
+        let user = format!("{:#x}", addr);
+        Box::pin(async_stream::stream! {
+            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
+            let sub = serde_json::json!({
+                "method": "subscribe",
+                "subscription": {"type": "userNonFundingLedgerUpdates", "user": user}
+            });
+            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
+                if env.channel != "userNonFundingLedgerUpdates" { continue; }
+                let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else { continue; };
+                for entry in ledger.updates {
+                    if entry.delta.kind == "deposit" {
+                        if let Some(amount_usd) = entry.delta.usdc.as_deref().and_then(parse_decimal) {
+                            yield Deposit { asset: "USDC".to_string(), amount_usd, timestamp_ms: entry.time };
+                        }
+                    }
+                }
+            }
+        })
     }
 
-    /// Hyperliquid does not expose real-time withdrawal events via WebSocket; returns an empty stream.
     fn subscribe_withdrawals(&self) -> BoxStream<Withdrawal> {
-        Box::pin(stream::empty())
+        let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
+        let user = format!("{:#x}", addr);
+        Box::pin(async_stream::stream! {
+            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
+            let sub = serde_json::json!({
+                "method": "subscribe",
+                "subscription": {"type": "userNonFundingLedgerUpdates", "user": user}
+            });
+            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
+                if env.channel != "userNonFundingLedgerUpdates" { continue; }
+                let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else { continue; };
+                for entry in ledger.updates {
+                    if entry.delta.kind == "withdraw" {
+                        if let Some(amount_usd) = entry.delta.usdc.as_deref().and_then(parse_decimal) {
+                            yield Withdrawal { asset: "USDC".to_string(), amount_usd, timestamp_ms: entry.time };
+                        }
+                    }
+                }
+            }
+        })
     }
 }
