@@ -1,5 +1,5 @@
 use alloy_primitives::Address;
-use guilder_abstraction::{self, L2Update, Fill, AssetContext, Liquidation, BoxStream, Side, OrderSide, OrderStatus, OrderType, TimeInForce, OrderPlacement, Position, OpenOrder, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
+use guilder_abstraction::{self, L2Update, Fill, AssetContext, PredictedFunding, Liquidation, BoxStream, Side, OrderSide, OrderStatus, OrderType, TimeInForce, OrderPlacement, Position, OpenOrder, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
 use futures_util::{stream, SinkExt, StreamExt};
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -109,6 +109,10 @@ struct RestAssetCtx {
     funding: String,
     mark_px: String,
     day_ntl_vlm: String,
+    mid_px: Option<String>,
+    oracle_px: Option<String>,
+    premium: Option<String>,
+    prev_day_px: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -149,6 +153,17 @@ struct RestOpenOrder {
     orig_sz: String,
 }
 
+// predictedFundings response: Vec<(coin, Vec<(venue, entry_or_null)>)>
+// The API returns null for venues that don't list the coin.
+type PredictedFundingsResponse = Vec<(String, Vec<(String, Option<PredictedFundingEntry>)>)>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PredictedFundingEntry {
+    funding_rate: String,
+    next_funding_time: i64,
+}
+
 // --- WebSocket envelope and data shapes ---
 
 #[derive(Deserialize)]
@@ -184,6 +199,10 @@ struct WsPerpsCtx {
     funding: String,
     mark_px: String,
     day_ntl_vlm: String,
+    mid_px: Option<String>,
+    oracle_px: Option<String>,
+    premium: Option<String>,
+    prev_day_px: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -422,6 +441,10 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             funding_rate: parse_decimal(&ctx.funding).ok_or("invalid funding")?,
             mark_price: parse_decimal(&ctx.mark_px).ok_or("invalid mark_px")?,
             day_volume: parse_decimal(&ctx.day_ntl_vlm).ok_or("invalid day_ntl_vlm")?,
+            mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
+            oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
+            premium: ctx.premium.as_deref().and_then(parse_decimal),
+            prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
         })
     }
 
@@ -461,6 +484,33 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .get(&symbol)
             .and_then(|s| parse_decimal(s))
             .ok_or_else(|| format!("symbol {} not found", symbol))
+    }
+
+    /// Returns predicted funding rates for all symbols across all venues.
+    /// Null venue entries (unsupported coins) are silently skipped.
+    async fn get_predicted_fundings(&self) -> Result<Vec<PredictedFunding>, String> {
+        let resp = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "predictedFundings"}))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let data: PredictedFundingsResponse = parse_response(resp).await?;
+        let mut result = Vec::new();
+        for (symbol, venues) in data {
+            for (venue, entry) in venues {
+                let Some(entry) = entry else { continue };
+                if let Some(funding_rate) = parse_decimal(&entry.funding_rate) {
+                    result.push(PredictedFunding {
+                        symbol: symbol.clone(),
+                        venue,
+                        funding_rate,
+                        next_funding_time_ms: entry.next_funding_time,
+                    });
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -665,7 +715,17 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     parse_decimal(&ctx.mark_px),
                     parse_decimal(&ctx.day_ntl_vlm),
                 ) {
-                    yield AssetContext { symbol: update.coin, open_interest, funding_rate, mark_price, day_volume };
+                    yield AssetContext {
+                        symbol: update.coin,
+                        open_interest,
+                        funding_rate,
+                        mark_price,
+                        day_volume,
+                        mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
+                        oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
+                        premium: ctx.premium.as_deref().and_then(parse_decimal),
+                        prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+                    };
                 }
             }
         })
