@@ -73,12 +73,24 @@ class Liquidation:
 
 class AssetContext:
 	"""snapshot of market metrics"""
-	def __init__(self, symbol: str, open_interest: str, funding_rate: str, mark_price: str, day_volume: str):
+	def __init__(self, symbol: str, open_interest: str, funding_rate: str, mark_price: str, day_volume: str, mid_price: Option<Decimal>, oracle_price: Option<Decimal>, premium: Option<Decimal>, prev_day_price: Option<Decimal>):
 		self.symbol = symbol
 		self.open_interest = open_interest
 		self.funding_rate = funding_rate
 		self.mark_price = mark_price
 		self.day_volume = day_volume
+		self.mid_price = mid_price
+		self.oracle_price = oracle_price
+		self.premium = premium
+		self.prev_day_price = prev_day_price
+
+class PredictedFunding:
+	"""predicted funding rate for a symbol at a venue"""
+	def __init__(self, symbol: str, venue: str, funding_rate: str, next_funding_time_ms: int):
+		self.symbol = symbol
+		self.venue = venue
+		self.funding_rate = funding_rate
+		self.next_funding_time_ms = next_funding_time_ms
 
 class Fill:
 	"""market trade event"""
@@ -195,6 +207,21 @@ class GetMarketData(ABC):
 	@abstractmethod
 	async def get_asset_context(self, symbol: str) -> Result<AssetContext, String>:
 		"""get snapshot of market metrics (OI, funding rate, mark price, 24h volume)"""
+		pass
+
+	@abstractmethod
+	async def get_all_asset_contexts(self) -> Result<Vec<AssetContext>, String>:
+		"""get all asset context snapshots in one call (prefer over repeated get_asset_context)"""
+		pass
+
+	@abstractmethod
+	async def get_predicted_fundings(self) -> Result<Vec<PredictedFunding>, String>:
+		"""get predicted funding rates for all symbols across all venues"""
+		pass
+
+	@abstractmethod
+	async def get_l2_orderbook(self, symbol: str) -> Result<Vec<L2Update>, String>:
+		"""get full L2 orderbook snapshot for a symbol (for initialization)"""
 		pass
 
 

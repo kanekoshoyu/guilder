@@ -126,6 +126,19 @@ pub struct AssetContext {
 	pub funding_rate: Decimal,
 	pub mark_price: Decimal,
 	pub day_volume: Decimal,
+	pub mid_price: Option<Decimal>,
+	pub oracle_price: Option<Decimal>,
+	pub premium: Option<Decimal>,
+	pub prev_day_price: Option<Decimal>,
+}
+
+/// predicted funding rate for a symbol at a venue
+#[derive(Debug, Clone)]
+pub struct PredictedFunding {
+	pub symbol: String,
+	pub venue: String,
+	pub funding_rate: Decimal,
+	pub next_funding_time_ms: i64,
 }
 
 /// market trade event
@@ -239,6 +252,10 @@ pub trait GetMarketData {
 	async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String>;
 	/// get snapshot of market metrics (OI, funding rate, mark price, 24h volume)
 	async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String>;
+	/// get all asset context snapshots in one call (prefer over repeated get_asset_context)
+	async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String>;
+	/// get predicted funding rates for all symbols across all venues
+	async fn get_predicted_fundings(&self) -> Result<Vec<PredictedFunding>, String>;
 	/// get full L2 orderbook snapshot for a symbol (for initialization)
 	async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String>;
 }

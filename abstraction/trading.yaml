@@ -40,6 +40,14 @@ traits:
           - name: symbol
             type: String
 
+      - name: get_all_asset_contexts
+        description: get all asset context snapshots in one call (prefer over repeated get_asset_context)
+        return_type: Result<Vec<AssetContext>, String>
+
+      - name: get_predicted_fundings
+        description: get predicted funding rates for all symbols across all venues
+        return_type: Result<Vec<PredictedFunding>, String>
+
       - name: get_l2_orderbook
         description: get full L2 orderbook snapshot for a symbol (for initialization)
         return_type: Result<Vec<L2Update>, String>
@@ -292,6 +300,26 @@ structs:
         type: Decimal
       - name: day_volume
         type: Decimal
+      - name: mid_price
+        type: Option<Decimal>
+      - name: oracle_price
+        type: Option<Decimal>
+      - name: premium
+        type: Option<Decimal>
+      - name: prev_day_price
+        type: Option<Decimal>
+
+  - name: PredictedFunding
+    description: predicted funding rate for a symbol at a venue
+    values:
+      - name: symbol
+        type: String
+      - name: venue
+        type: String
+      - name: funding_rate
+        type: Decimal
+      - name: next_funding_time_ms
+        type: i64
 
   - name: Fill
     description: market trade event

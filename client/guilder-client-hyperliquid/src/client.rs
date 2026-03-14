@@ -450,6 +450,38 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
         })
     }
 
+    /// Fetches metaAndAssetCtxs once and returns all asset contexts in universe order.
+    /// Prefer this over repeated `get_asset_context` calls to avoid rate-limiting.
+    async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String> {
+        let resp = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "metaAndAssetCtxs"}))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp).await?
+            .ok_or_else(|| "metaAndAssetCtxs returned null".to_string())?;
+        let mut result = Vec::with_capacity(meta.universe.len());
+        for (asset, ctx) in meta.universe.iter().zip(ctxs.iter()) {
+            let Some(open_interest) = parse_decimal(&ctx.open_interest) else { continue };
+            let Some(funding_rate) = parse_decimal(&ctx.funding) else { continue };
+            let Some(mark_price) = parse_decimal(&ctx.mark_px) else { continue };
+            let Some(day_volume) = parse_decimal(&ctx.day_ntl_vlm) else { continue };
+            result.push(AssetContext {
+                symbol: asset.name.clone(),
+                open_interest,
+                funding_rate,
+                mark_price,
+                day_volume,
+                mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
+                oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
+                premium: ctx.premium.as_deref().and_then(parse_decimal),
+                prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+            });
+        }
+        Ok(result)
+    }
+
     /// Returns a full L2 orderbook snapshot for `symbol` from the l2Book REST endpoint.
     /// Levels are returned as individual `L2Update` items; all share the same `sequence` (timestamp).
     async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
