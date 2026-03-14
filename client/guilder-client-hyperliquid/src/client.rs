@@ -414,7 +414,8 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let (meta, ctxs) = parse_response::<MetaAndAssetCtxsResponse>(resp).await?;
+        let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp).await?
+            .ok_or_else(|| "metaAndAssetCtxs returned null".to_string())?;
         meta.universe.iter()
             .position(|a| a.name == symbol)
             .and_then(|i| ctxs.get(i))
@@ -430,7 +431,8 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let (meta, ctxs) = parse_response::<MetaAndAssetCtxsResponse>(resp).await?;
+        let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp).await?
+            .ok_or_else(|| "metaAndAssetCtxs returned null".to_string())?;
         let idx = meta.universe.iter()
             .position(|a| a.name == symbol)
             .ok_or_else(|| format!("symbol {} not found", symbol))?;
