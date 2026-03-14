@@ -425,6 +425,30 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
         })
     }
 
+    /// Returns a full L2 orderbook snapshot for `symbol` from the l2Book REST endpoint.
+    /// Levels are returned as individual `L2Update` items; all share the same `sequence` (timestamp).
+    async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
+        let resp = self.client
+            .post(HYPERLIQUID_INFO_URL)
+            .json(&serde_json::json!({"type": "l2Book", "coin": symbol}))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let book: WsBook = parse_response(resp).await?;
+        let mut levels = Vec::new();
+        for level in book.levels.first().into_iter().flatten() {
+            if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
+                levels.push(L2Update { symbol: book.coin.clone(), price, volume, side: Side::Ask, sequence: book.time });
+            }
+        }
+        for level in book.levels.get(1).into_iter().flatten() {
+            if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
+                levels.push(L2Update { symbol: book.coin.clone(), price, volume, side: Side::Bid, sequence: book.time });
+            }
+        }
+        Ok(levels)
+    }
+
     /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
     async fn get_price(&self, symbol: String) -> Result<Decimal, String> {
         let resp = self.client

@@ -239,6 +239,8 @@ pub trait GetMarketData {
 	async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String>;
 	/// get snapshot of market metrics (OI, funding rate, mark price, 24h volume)
 	async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String>;
+	/// get full L2 orderbook snapshot for a symbol (for initialization)
+	async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String>;
 }
 
 /// place, change, cancel order

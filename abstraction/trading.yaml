@@ -40,6 +40,13 @@ traits:
           - name: symbol
             type: String
 
+      - name: get_l2_orderbook
+        description: get full L2 orderbook snapshot for a symbol (for initialization)
+        return_type: Result<Vec<L2Update>, String>
+        args:
+          - name: symbol
+            type: String
+
   - name: ManageOrder
     description: place, change, cancel order
     async: true
