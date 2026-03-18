@@ -9,8 +9,8 @@ license = "MIT"
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = { path = "../../abstraction/target/rust" }
-# guilder-abstraction = "0.1.12"
+# guilder-abstraction = { path = "../../abstraction/target/rust" }
+guilder-abstraction = "0.1.12"
 reqwest = { workspace = true, features = ["json"] }
 futures-core.workspace = true
 futures-util = "0.3"

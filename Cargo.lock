@@ -902,6 +902,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "guilder-abstraction"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0b8ea4f835ebb8b4e6bca999a2c62f78044ed7d053037427d07f50ec51ef676"
+dependencies = [
+ "futures-core",
+ "rust_decimal",
+]
+
+[[package]]
 name = "guilder-abstraction-codegen"
 version = "0.1.4"
 dependencies = [
@@ -915,7 +925,7 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
- "guilder-abstraction",
+ "guilder-abstraction 0.1.12",
  "reqwest",
  "rust_decimal",
 ]
@@ -928,7 +938,7 @@ dependencies = [
  "async-stream",
  "futures-core",
  "futures-util",
- "guilder-abstraction",
+ "guilder-abstraction 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "k256",
  "reqwest",
@@ -945,7 +955,7 @@ dependencies = [
 name = "guilder-core"
 version = "0.1.0"
 dependencies = [
- "guilder-abstraction",
+ "guilder-abstraction 0.1.12",
  "ordered-float",
 ]
 
