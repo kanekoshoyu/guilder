@@ -104,28 +104,28 @@ traits:
     methods:
       - name: subscribe_l2_update
         description: subscribe to L2 orderbook updates for a symbol
-        return_type: Stream<L2Update>
+        return_type: Stream<Result<L2Update, String>>
         args:
           - name: symbol
             type: String
 
       - name: subscribe_fill
         description: subscribe to market fill events for a symbol
-        return_type: Stream<Fill>
+        return_type: Stream<Result<Fill, String>>
         args:
           - name: symbol
             type: String
 
       - name: subscribe_asset_context
         description: subscribe to asset context updates (OI, funding rate, mark price, 24h volume)
-        return_type: Stream<AssetContext>
+        return_type: Stream<Result<AssetContext, String>>
         args:
           - name: symbol
             type: String
 
       - name: subscribe_liquidation
         description: subscribe to liquidation events for a user address
-        return_type: Stream<Liquidation>
+        return_type: Stream<Result<Liquidation, String>>
         args:
           - name: user
             type: String
@@ -152,23 +152,23 @@ traits:
     methods:
       - name: subscribe_user_fills
         description: stream executions of the user's own orders
-        return_type: Stream<UserFill>
+        return_type: Stream<Result<UserFill, String>>
 
       - name: subscribe_order_updates
         description: stream order lifecycle updates
-        return_type: Stream<OrderUpdate>
+        return_type: Stream<Result<OrderUpdate, String>>
 
       - name: subscribe_funding_payments
         description: stream funding payments applied to positions
-        return_type: Stream<FundingPayment>
+        return_type: Stream<Result<FundingPayment, String>>
 
       - name: subscribe_deposits
         description: stream account deposit events
-        return_type: Stream<Deposit>
+        return_type: Stream<Result<Deposit, String>>
 
       - name: subscribe_withdrawals
         description: stream account withdrawal events
-        return_type: Stream<Withdrawal>
+        return_type: Stream<Result<Withdrawal, String>>
 
 
 enums:

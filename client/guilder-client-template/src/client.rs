@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, L2Update, Fill, AssetContext, Liquidation, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, UserFill, OrderUpdate, FundingPayment, Deposit, Withdrawal};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -82,19 +82,19 @@ impl guilder_abstraction::ManageOrder for ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketData for ExchangeClient {
-    fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update> {
+    fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_fill(&self, symbol: String) -> BoxStream<Fill> {
+    fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext> {
+    fn subscribe_asset_context(&self, symbol: String) -> BoxStream<Result<AssetContext, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation> {
+    fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>> {
         Box::pin(stream::empty())
     }
 
@@ -120,23 +120,23 @@ impl guilder_abstraction::GetAccountSnapshot for ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeUserEvents for ExchangeClient {
-    fn subscribe_user_fills(&self) -> BoxStream<UserFill> {
+    fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_order_updates(&self) -> BoxStream<OrderUpdate> {
+    fn subscribe_order_updates(&self) -> BoxStream<Result<OrderUpdate, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_funding_payments(&self) -> BoxStream<FundingPayment> {
+    fn subscribe_funding_payments(&self) -> BoxStream<Result<FundingPayment, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_deposits(&self) -> BoxStream<Deposit> {
+    fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_withdrawals(&self) -> BoxStream<Withdrawal> {
+    fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
         Box::pin(stream::empty())
     }
 

@@ -251,22 +251,22 @@ class ManageOrder(ABC):
 class SubscribeMarketData(ABC):
 	"""subscribe to streaming market data"""
 	@abstractmethod
-	async def subscribe_l2_update(self, symbol: str) -> AsyncIterator[L2Update]:
+	async def subscribe_l2_update(self, symbol: str) -> AsyncIterator[Result<L2Update, String>]:
 		"""subscribe to L2 orderbook updates for a symbol"""
 		pass
 
 	@abstractmethod
-	async def subscribe_fill(self, symbol: str) -> AsyncIterator[Fill]:
+	async def subscribe_fill(self, symbol: str) -> AsyncIterator[Result<Fill, String>]:
 		"""subscribe to market fill events for a symbol"""
 		pass
 
 	@abstractmethod
-	async def subscribe_asset_context(self, symbol: str) -> AsyncIterator[AssetContext]:
+	async def subscribe_asset_context(self, symbol: str) -> AsyncIterator[Result<AssetContext, String>]:
 		"""subscribe to asset context updates (OI, funding rate, mark price, 24h volume)"""
 		pass
 
 	@abstractmethod
-	async def subscribe_liquidation(self, user: str) -> AsyncIterator[Liquidation]:
+	async def subscribe_liquidation(self, user: str) -> AsyncIterator[Result<Liquidation, String>]:
 		"""subscribe to liquidation events for a user address"""
 		pass
 
@@ -292,27 +292,27 @@ class GetAccountSnapshot(ABC):
 class SubscribeUserEvents(ABC):
 	"""subscribe to authenticated user account events"""
 	@abstractmethod
-	async def subscribe_user_fills(self) -> AsyncIterator[UserFill]:
+	async def subscribe_user_fills(self) -> AsyncIterator[Result<UserFill, String>]:
 		"""stream executions of the user's own orders"""
 		pass
 
 	@abstractmethod
-	async def subscribe_order_updates(self) -> AsyncIterator[OrderUpdate]:
+	async def subscribe_order_updates(self) -> AsyncIterator[Result<OrderUpdate, String>]:
 		"""stream order lifecycle updates"""
 		pass
 
 	@abstractmethod
-	async def subscribe_funding_payments(self) -> AsyncIterator[FundingPayment]:
+	async def subscribe_funding_payments(self) -> AsyncIterator[Result<FundingPayment, String>]:
 		"""stream funding payments applied to positions"""
 		pass
 
 	@abstractmethod
-	async def subscribe_deposits(self) -> AsyncIterator[Deposit]:
+	async def subscribe_deposits(self) -> AsyncIterator[Result<Deposit, String>]:
 		"""stream account deposit events"""
 		pass
 
 	@abstractmethod
-	async def subscribe_withdrawals(self) -> AsyncIterator[Withdrawal]:
+	async def subscribe_withdrawals(self) -> AsyncIterator[Result<Withdrawal, String>]:
 		"""stream account withdrawal events"""
 		pass
 

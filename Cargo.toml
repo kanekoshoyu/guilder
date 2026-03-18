@@ -25,4 +25,4 @@ ordered-float = "4.2.2"
 # async stream trait (no runtime, tokio-compatible)
 futures-core = "0.3"
 # async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

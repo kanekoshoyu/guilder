@@ -277,13 +277,13 @@ pub trait ManageOrder {
 #[allow(async_fn_in_trait)]
 pub trait SubscribeMarketData {
 	/// subscribe to L2 orderbook updates for a symbol
-	fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update>;
+	fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>>;
 	/// subscribe to market fill events for a symbol
-	fn subscribe_fill(&self, symbol: String) -> BoxStream<Fill>;
+	fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>>;
 	/// subscribe to asset context updates (OI, funding rate, mark price, 24h volume)
-	fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext>;
+	fn subscribe_asset_context(&self, symbol: String) -> BoxStream<Result<AssetContext, String>>;
 	/// subscribe to liquidation events for a user address
-	fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation>;
+	fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>>;
 }
 
 /// query authenticated account snapshot
@@ -301,14 +301,14 @@ pub trait GetAccountSnapshot {
 #[allow(async_fn_in_trait)]
 pub trait SubscribeUserEvents {
 	/// stream executions of the user's own orders
-	fn subscribe_user_fills(&self) -> BoxStream<UserFill>;
+	fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>>;
 	/// stream order lifecycle updates
-	fn subscribe_order_updates(&self) -> BoxStream<OrderUpdate>;
+	fn subscribe_order_updates(&self) -> BoxStream<Result<OrderUpdate, String>>;
 	/// stream funding payments applied to positions
-	fn subscribe_funding_payments(&self) -> BoxStream<FundingPayment>;
+	fn subscribe_funding_payments(&self) -> BoxStream<Result<FundingPayment, String>>;
 	/// stream account deposit events
-	fn subscribe_deposits(&self) -> BoxStream<Deposit>;
+	fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>>;
 	/// stream account withdrawal events
-	fn subscribe_withdrawals(&self) -> BoxStream<Withdrawal>;
+	fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>>;
 }
 

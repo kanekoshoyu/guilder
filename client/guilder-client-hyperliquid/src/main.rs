@@ -65,7 +65,11 @@ async fn check_l2_freshness(client: &HyperliquidClient) {
 
     while snapshots < L2_SNAPSHOT_COUNT {
         let event = match timeout(Duration::from_secs(10), stream.next()).await {
-            Ok(Some(e)) => e,
+            Ok(Some(Ok(e))) => e,
+            Ok(Some(Err(e))) => {
+                println!("  ERROR: {e}");
+                break;
+            }
             Ok(None) => {
                 println!("  stream closed unexpectedly");
                 break;
@@ -122,7 +126,11 @@ async fn check_asset_ctx_freshness(client: &HyperliquidClient) {
 
     while count < ASSET_CTX_SAMPLE_COUNT {
         let ctx = match timeout(Duration::from_secs(ASSET_CTX_TIMEOUT_SECS), stream.next()).await {
-            Ok(Some(c)) => c,
+            Ok(Some(Ok(c))) => c,
+            Ok(Some(Err(e))) => {
+                println!("  ERROR: {e}");
+                break;
+            }
             Ok(None) => {
                 println!("  stream closed unexpectedly");
                 break;

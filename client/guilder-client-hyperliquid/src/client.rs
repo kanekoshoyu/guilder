@@ -169,6 +169,7 @@ struct PredictedFundingEntry {
 #[derive(Deserialize)]
 struct WsEnvelope {
     channel: String,
+    #[serde(default)]
     data: Value,
 }
 
@@ -366,6 +367,69 @@ fn sign_action(private_key: &str, action: &Value, vault_address: Option<&str>, n
     let v = 27u8 + recovery_id.to_byte();
 
     Ok((r, s, v))
+}
+
+/// Generic WebSocket subscription helper.
+///
+/// Connects to the Hyperliquid WS endpoint, sends `subscription`, then drives the read loop:
+/// - Replies to server `Ping` frames with `Pong`.
+/// - Sends an application-level `{"method":"ping"}` every 50 s to keep the connection alive.
+/// - Surfaces connect / send / protocol errors as `Err` items, then terminates the stream.
+/// - Calls `parse(envelope)` for each `Text` message; non-empty `Vec`s become `Ok` items.
+///   Non-envelope messages (e.g. pong responses) are silently skipped.
+fn ws_subscribe<T, F>(subscription: Value, mut parse: F) -> BoxStream<Result<T, String>>
+where
+    T: Send + 'static,
+    F: FnMut(WsEnvelope) -> Vec<T> + Send + 'static,
+{
+    Box::pin(async_stream::stream! {
+        let ws = match connect_async(HYPERLIQUID_WS_URL).await {
+            Ok((ws, _)) => ws,
+            Err(e) => { yield Err(e.to_string()); return; }
+        };
+        let (mut sink, mut stream) = ws.split();
+        if let Err(e) = sink.send(Message::Text(subscription.to_string().into())).await {
+            yield Err(e.to_string());
+            return;
+        }
+        let mut ping_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + std::time::Duration::from_secs(50),
+            std::time::Duration::from_secs(50),
+        );
+        loop {
+            tokio::select! {
+                _ = ping_interval.tick() => {
+                    if let Err(e) = sink.send(Message::Text(r#"{"method":"ping"}"#.to_string().into())).await {
+                        yield Err(e.to_string());
+                        return;
+                    }
+                }
+                msg = stream.next() => {
+                    match msg {
+                        None => return,
+                        Some(Err(e)) => { yield Err(e.to_string()); return; }
+                        Some(Ok(Message::Ping(data))) => { let _ = sink.send(Message::Pong(data)).await; }
+                        Some(Ok(Message::Close(_))) => { yield Err("websocket closed".to_string()); return; }
+                        Some(Ok(Message::Text(text))) => {
+                            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                                yield Err(format!("unexpected ws message: {text}"));
+                                return;
+                            };
+                            match env.channel.as_str() {
+                                "pong" | "subscriptionResponse" => {}
+                                _ => {
+                                    for item in parse(env) {
+                                        yield Ok(item);
+                                    }
+                                }
+                            }
+                        }
+                        Some(Ok(_)) => {}
+                    }
+                }
+            }
+        }
+    })
 }
 
 // --- Trait implementations ---
@@ -697,128 +761,95 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
-    /// Streams L2 orderbook updates for `symbol`. Each message from Hyperliquid is a
-    /// full-depth snapshot; every level is emitted as an individual `L2Update` event.
-    /// All levels in the same snapshot share the same `sequence` value.
-    fn subscribe_l2_update(&self, symbol: String) -> BoxStream<L2Update> {
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "l2Book", "coin": symbol}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "l2Book" { continue; }
-                let Ok(book) = serde_json::from_value::<WsBook>(env.data) else { continue; };
-
-                for level in book.levels.first().into_iter().flatten() {
-                    if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
-                        yield L2Update { symbol: book.coin.clone(), price, volume, side: Side::Ask, sequence: book.time };
-                    }
-                }
-                for level in book.levels.get(1).into_iter().flatten() {
-                    if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
-                        yield L2Update { symbol: book.coin.clone(), price, volume, side: Side::Bid, sequence: book.time };
-                    }
+    fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "l2Book", "coin": symbol}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "l2Book" { return vec![]; }
+            let Ok(book) = serde_json::from_value::<WsBook>(env.data) else { return vec![]; };
+            let mut items = Vec::new();
+            for level in book.levels.first().into_iter().flatten() {
+                if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
+                    items.push(L2Update { symbol: book.coin.clone(), price, volume, side: Side::Ask, sequence: book.time });
                 }
             }
+            for level in book.levels.get(1).into_iter().flatten() {
+                if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
+                    items.push(L2Update { symbol: book.coin.clone(), price, volume, side: Side::Bid, sequence: book.time });
+                }
+            }
+            items
         })
     }
 
-    /// Streams asset context updates for `symbol` via Hyperliquid's `activeAssetCtx` subscription.
-    fn subscribe_asset_context(&self, symbol: String) -> BoxStream<AssetContext> {
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "activeAssetCtx", "coin": symbol}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "activeAssetCtx" { continue; }
-                let Ok(update) = serde_json::from_value::<WsAssetCtx>(env.data) else { continue; };
-                let ctx = &update.ctx;
-                if let (Some(open_interest), Some(funding_rate), Some(mark_price), Some(day_volume)) = (
-                    parse_decimal(&ctx.open_interest),
-                    parse_decimal(&ctx.funding),
-                    parse_decimal(&ctx.mark_px),
-                    parse_decimal(&ctx.day_ntl_vlm),
-                ) {
-                    yield AssetContext {
-                        symbol: update.coin,
-                        open_interest,
-                        funding_rate,
-                        mark_price,
-                        day_volume,
-                        mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
-                        oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
-                        premium: ctx.premium.as_deref().and_then(parse_decimal),
-                        prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
-                    };
-                }
-            }
+    fn subscribe_asset_context(&self, symbol: String) -> BoxStream<Result<AssetContext, String>> {
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "activeAssetCtx", "coin": symbol}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "activeAssetCtx" { return vec![]; }
+            let Ok(update) = serde_json::from_value::<WsAssetCtx>(env.data) else { return vec![]; };
+            let ctx = &update.ctx;
+            let (Some(open_interest), Some(funding_rate), Some(mark_price), Some(day_volume)) = (
+                parse_decimal(&ctx.open_interest),
+                parse_decimal(&ctx.funding),
+                parse_decimal(&ctx.mark_px),
+                parse_decimal(&ctx.day_ntl_vlm),
+            ) else { return vec![]; };
+            vec![AssetContext {
+                symbol: update.coin,
+                open_interest,
+                funding_rate,
+                mark_price,
+                day_volume,
+                mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
+                oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
+                premium: ctx.premium.as_deref().and_then(parse_decimal),
+                prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+            }]
         })
     }
 
-    /// Streams liquidation events for a user address via Hyperliquid's `userEvents` subscription.
-    /// Hyperliquid's liquidation event is account-level; `symbol` is empty and `side` is `Sell`.
-    fn subscribe_liquidation(&self, user: String) -> BoxStream<Liquidation> {
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "userEvents", "user": user}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "userEvents" { continue; }
-                let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { continue; };
-                let Some(liq) = event.liquidation else { continue; };
-                if let (Some(notional_position), Some(account_value)) = (
-                    parse_decimal(&liq.liquidated_ntl_pos),
-                    parse_decimal(&liq.liquidated_account_value),
-                ) {
-                    yield Liquidation {
-                        symbol: String::new(),
-                        side: OrderSide::Sell,
-                        liquidated_user: liq.liquidated_user,
-                        notional_position,
-                        account_value,
-                    };
-                }
-            }
+    fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>> {
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "userEvents", "user": user}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "userEvents" { return vec![]; }
+            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { return vec![]; };
+            let Some(liq) = event.liquidation else { return vec![]; };
+            let (Some(notional_position), Some(account_value)) = (
+                parse_decimal(&liq.liquidated_ntl_pos),
+                parse_decimal(&liq.liquidated_account_value),
+            ) else { return vec![]; };
+            vec![Liquidation {
+                symbol: String::new(),
+                side: OrderSide::Sell,
+                liquidated_user: liq.liquidated_user,
+                notional_position,
+                account_value,
+            }]
         })
     }
 
-    /// Streams public trade fills for `symbol`. "B" (buyer aggressor) → Buy, otherwise → Sell.
-    fn subscribe_fill(&self, symbol: String) -> BoxStream<Fill> {
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "trades", "coin": symbol}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "trades" { continue; }
-                let Ok(trades) = serde_json::from_value::<Vec<WsTrade>>(env.data) else { continue; };
-
-                for trade in trades {
-                    let side = if trade.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
-                    if let (Some(price), Some(volume)) = (parse_decimal(&trade.px), parse_decimal(&trade.sz)) {
-                        yield Fill { symbol: trade.coin, price, volume, side, timestamp_ms: trade.time, trade_id: trade.tid };
-                    }
-                }
-            }
+    fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>> {
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "trades", "coin": symbol}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "trades" { return vec![]; }
+            let Ok(trades) = serde_json::from_value::<Vec<WsTrade>>(env.data) else { return vec![]; };
+            trades.into_iter().filter_map(|trade| {
+                let side = if trade.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
+                let price = parse_decimal(&trade.px)?;
+                let volume = parse_decimal(&trade.sz)?;
+                Some(Fill { symbol: trade.coin, price, volume, side, timestamp_ms: trade.time, trade_id: trade.tid })
+            }).collect()
         })
     }
 }
@@ -890,149 +921,102 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
-    /// Streams the user's own order executions via the `userEvents` WS subscription.
-    /// Requires `with_auth` (streams are empty if no user address is set).
-    fn subscribe_user_fills(&self) -> BoxStream<UserFill> {
+    fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>> {
         let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
-        let user = format!("{:#x}", addr);
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "userEvents", "user": user}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "userEvents" { continue; }
-                let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { continue; };
-                for fill in event.fills.unwrap_or_default() {
-                    let side = if fill.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
-                    if let (Some(price), Some(quantity), Some(fee_usd)) = (
-                        parse_decimal(&fill.px),
-                        parse_decimal(&fill.sz),
-                        parse_decimal(&fill.fee),
-                    ) {
-                        yield UserFill { order_id: fill.oid, symbol: fill.coin, side, price, quantity, fee_usd, timestamp_ms: fill.time };
-                    }
-                }
-            }
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "userEvents", "user": format!("{:#x}", addr)}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "userEvents" { return vec![]; }
+            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { return vec![]; };
+            event.fills.unwrap_or_default().into_iter().filter_map(|fill| {
+                let side = if fill.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
+                let price = parse_decimal(&fill.px)?;
+                let quantity = parse_decimal(&fill.sz)?;
+                let fee_usd = parse_decimal(&fill.fee)?;
+                Some(UserFill { order_id: fill.oid, symbol: fill.coin, side, price, quantity, fee_usd, timestamp_ms: fill.time })
+            }).collect()
         })
     }
 
-    /// Streams order lifecycle events via the `orderUpdates` WS subscription.
-    /// Requires `with_auth`.
-    fn subscribe_order_updates(&self) -> BoxStream<OrderUpdate> {
+    fn subscribe_order_updates(&self) -> BoxStream<Result<OrderUpdate, String>> {
         let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
-        let user = format!("{:#x}", addr);
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "orderUpdates", "user": user}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "orderUpdates" { continue; }
-                let Ok(updates) = serde_json::from_value::<Vec<WsOrderUpdate>>(env.data) else { continue; };
-                for upd in updates {
-                    let status = match upd.status.as_str() {
-                        "open" => OrderStatus::Placed,
-                        "filled" => OrderStatus::Filled,
-                        "canceled" | "cancelled" => OrderStatus::Cancelled,
-                        _ => OrderStatus::PartiallyFilled,
-                    };
-                    let side = if upd.order.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
-                    yield OrderUpdate {
-                        order_id: upd.order.oid,
-                        symbol: upd.order.coin,
-                        status,
-                        side: Some(side),
-                        price: parse_decimal(&upd.order.limit_px),
-                        quantity: parse_decimal(&upd.order.orig_sz),
-                        remaining_quantity: parse_decimal(&upd.order.sz),
-                        timestamp_ms: upd.status_timestamp,
-                    };
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "orderUpdates", "user": format!("{:#x}", addr)}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "orderUpdates" { return vec![]; }
+            let Ok(updates) = serde_json::from_value::<Vec<WsOrderUpdate>>(env.data) else { return vec![]; };
+            updates.into_iter().map(|upd| {
+                let status = match upd.status.as_str() {
+                    "open" => OrderStatus::Placed,
+                    "filled" => OrderStatus::Filled,
+                    "canceled" | "cancelled" => OrderStatus::Cancelled,
+                    _ => OrderStatus::PartiallyFilled,
+                };
+                let side = if upd.order.side == "B" { OrderSide::Buy } else { OrderSide::Sell };
+                OrderUpdate {
+                    order_id: upd.order.oid,
+                    symbol: upd.order.coin,
+                    status,
+                    side: Some(side),
+                    price: parse_decimal(&upd.order.limit_px),
+                    quantity: parse_decimal(&upd.order.orig_sz),
+                    remaining_quantity: parse_decimal(&upd.order.sz),
+                    timestamp_ms: upd.status_timestamp,
                 }
-            }
+            }).collect()
         })
     }
 
-    /// Streams funding payments applied to positions via the `userEvents` WS subscription.
-    /// Requires `with_auth`.
-    fn subscribe_funding_payments(&self) -> BoxStream<FundingPayment> {
+    fn subscribe_funding_payments(&self) -> BoxStream<Result<FundingPayment, String>> {
         let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
-        let user = format!("{:#x}", addr);
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "userEvents", "user": user}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "userEvents" { continue; }
-                let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { continue; };
-                let Some(funding) = event.funding else { continue; };
-                if let Some(amount_usd) = parse_decimal(&funding.usdc) {
-                    yield FundingPayment { symbol: funding.coin, amount_usd, timestamp_ms: funding.time };
-                }
-            }
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "userEvents", "user": format!("{:#x}", addr)}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "userEvents" { return vec![]; }
+            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else { return vec![]; };
+            let Some(funding) = event.funding else { return vec![]; };
+            let Some(amount_usd) = parse_decimal(&funding.usdc) else { return vec![]; };
+            vec![FundingPayment { symbol: funding.coin, amount_usd, timestamp_ms: funding.time }]
         })
     }
 
-    fn subscribe_deposits(&self) -> BoxStream<Deposit> {
+    fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>> {
         let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
-        let user = format!("{:#x}", addr);
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "userNonFundingLedgerUpdates", "user": user}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "userNonFundingLedgerUpdates" { continue; }
-                let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else { continue; };
-                for entry in ledger.updates {
-                    if entry.delta.kind == "deposit" {
-                        if let Some(amount_usd) = entry.delta.usdc.as_deref().and_then(parse_decimal) {
-                            yield Deposit { asset: "USDC".to_string(), amount_usd, timestamp_ms: entry.time };
-                        }
-                    }
-                }
-            }
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "userNonFundingLedgerUpdates", "user": format!("{:#x}", addr)}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "userNonFundingLedgerUpdates" { return vec![]; }
+            let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else { return vec![]; };
+            ledger.updates.into_iter().filter_map(|e| {
+                if e.delta.kind != "deposit" { return None; }
+                let amount_usd = e.delta.usdc.as_deref().and_then(parse_decimal)?;
+                Some(Deposit { asset: "USDC".to_string(), amount_usd, timestamp_ms: e.time })
+            }).collect()
         })
     }
 
-    fn subscribe_withdrawals(&self) -> BoxStream<Withdrawal> {
+    fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
         let Some(addr) = self.user_address else { return Box::pin(stream::empty()); };
-        let user = format!("{:#x}", addr);
-        Box::pin(async_stream::stream! {
-            let Ok((mut ws, _)) = connect_async(HYPERLIQUID_WS_URL).await else { return; };
-            let sub = serde_json::json!({
-                "method": "subscribe",
-                "subscription": {"type": "userNonFundingLedgerUpdates", "user": user}
-            });
-            if ws.send(Message::Text(sub.to_string().into())).await.is_err() { return; }
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else { continue; };
-                if env.channel != "userNonFundingLedgerUpdates" { continue; }
-                let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else { continue; };
-                for entry in ledger.updates {
-                    if entry.delta.kind == "withdraw" {
-                        if let Some(amount_usd) = entry.delta.usdc.as_deref().and_then(parse_decimal) {
-                            yield Withdrawal { asset: "USDC".to_string(), amount_usd, timestamp_ms: entry.time };
-                        }
-                    }
-                }
-            }
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "userNonFundingLedgerUpdates", "user": format!("{:#x}", addr)}
+        });
+        ws_subscribe(sub, |env| {
+            if env.channel != "userNonFundingLedgerUpdates" { return vec![]; }
+            let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else { return vec![]; };
+            ledger.updates.into_iter().filter_map(|e| {
+                if e.delta.kind != "withdraw" { return None; }
+                let amount_usd = e.delta.usdc.as_deref().and_then(parse_decimal)?;
+                Some(Withdrawal { asset: "USDC".to_string(), amount_usd, timestamp_ms: e.time })
+            }).collect()
         })
     }
 }
