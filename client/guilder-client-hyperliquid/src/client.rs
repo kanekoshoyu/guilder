@@ -374,7 +374,7 @@ fn sign_action(private_key: &str, action: &Value, vault_address: Option<&str>, n
 /// Connects to the Hyperliquid WS endpoint, sends `subscription`, then drives the read loop:
 /// - Replies to server `Ping` frames with `Pong`.
 /// - Sends an application-level `{"method":"ping"}` every 50 s to keep the connection alive.
-/// - Surfaces connect / send / protocol errors as `Err` items, then terminates the stream.
+/// - Surfaces connect / send / protocol errors as `Err` items, then **reconnects after 5 s**.
 /// - Calls `parse(envelope)` for each `Text` message; non-empty `Vec`s become `Ok` items.
 ///   Non-envelope messages (e.g. pong responses) are silently skipped.
 fn ws_subscribe<T, F>(subscription: Value, mut parse: F) -> BoxStream<Result<T, String>>
@@ -383,50 +383,74 @@ where
     F: FnMut(WsEnvelope) -> Vec<T> + Send + 'static,
 {
     Box::pin(async_stream::stream! {
-        let ws = match connect_async(HYPERLIQUID_WS_URL).await {
-            Ok((ws, _)) => ws,
-            Err(e) => { yield Err(e.to_string()); return; }
-        };
-        let (mut sink, mut stream) = ws.split();
-        if let Err(e) = sink.send(Message::Text(subscription.to_string().into())).await {
-            yield Err(e.to_string());
-            return;
-        }
-        let mut ping_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + std::time::Duration::from_secs(50),
-            std::time::Duration::from_secs(50),
-        );
         loop {
-            tokio::select! {
-                _ = ping_interval.tick() => {
-                    if let Err(e) = sink.send(Message::Text(r#"{"method":"ping"}"#.to_string().into())).await {
-                        yield Err(e.to_string());
-                        return;
-                    }
+            let ws = match connect_async(HYPERLIQUID_WS_URL).await {
+                Ok((ws, _)) => ws,
+                Err(e) => {
+                    yield Err(format!("ws connect failed: {e} — reconnecting in 5s"));
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
                 }
-                msg = stream.next() => {
-                    match msg {
-                        None => return,
-                        Some(Err(e)) => { yield Err(e.to_string()); return; }
-                        Some(Ok(Message::Ping(data))) => { let _ = sink.send(Message::Pong(data)).await; }
-                        Some(Ok(Message::Close(_))) => { yield Err("websocket closed".to_string()); return; }
-                        Some(Ok(Message::Text(text))) => {
-                            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                                yield Err(format!("unexpected ws message: {text}"));
-                                return;
-                            };
-                            match env.channel.as_str() {
-                                "pong" | "subscriptionResponse" => {}
-                                _ => {
-                                    for item in parse(env) {
-                                        yield Ok(item);
+            };
+            let (mut sink, mut stream) = ws.split();
+            if let Err(e) = sink.send(Message::Text(subscription.to_string().into())).await {
+                yield Err(format!("ws subscribe failed: {e} — reconnecting in 5s"));
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+            let mut ping_interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + std::time::Duration::from_secs(50),
+                std::time::Duration::from_secs(50),
+            );
+            let should_reconnect;
+            loop {
+                tokio::select! {
+                    _ = ping_interval.tick() => {
+                        if let Err(e) = sink.send(Message::Text(r#"{"method":"ping"}"#.to_string().into())).await {
+                            yield Err(format!("ws ping failed: {e} — reconnecting in 5s"));
+                            should_reconnect = true;
+                            break;
+                        }
+                    }
+                    msg = stream.next() => {
+                        match msg {
+                            None => {
+                                yield Err("ws stream ended — reconnecting in 5s".to_string());
+                                should_reconnect = true;
+                                break;
+                            }
+                            Some(Err(e)) => {
+                                yield Err(format!("ws error: {e} — reconnecting in 5s"));
+                                should_reconnect = true;
+                                break;
+                            }
+                            Some(Ok(Message::Ping(data))) => { let _ = sink.send(Message::Pong(data)).await; }
+                            Some(Ok(Message::Close(_))) => {
+                                yield Err("websocket closed — reconnecting in 5s".to_string());
+                                should_reconnect = true;
+                                break;
+                            }
+                            Some(Ok(Message::Text(text))) => {
+                                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                                    yield Err(format!("unexpected ws message: {text}"));
+                                    continue;
+                                };
+                                match env.channel.as_str() {
+                                    "pong" | "subscriptionResponse" => {}
+                                    _ => {
+                                        for item in parse(env) {
+                                            yield Ok(item);
+                                        }
                                     }
                                 }
                             }
+                            Some(Ok(_)) => {}
                         }
-                        Some(Ok(_)) => {}
                     }
                 }
+            }
+            if should_reconnect {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         }
     })
@@ -555,7 +579,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let book: WsBook = parse_response(resp).await?;
+        let book: Option<WsBook> = parse_response(resp).await?;
+        let book = match book {
+            Some(b) => b,
+            None => return Ok(vec![]),
+        };
         let mut levels = Vec::new();
         for level in book.levels.first().into_iter().flatten() {
             if let (Some(price), Some(volume)) = (parse_decimal(&level.px), parse_decimal(&level.sz)) {
