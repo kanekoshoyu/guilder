@@ -49,6 +49,12 @@ pub struct RestRateLimiter {
     entries: Mutex<VecDeque<(Instant, u32)>>,
 }
 
+impl Default for RestRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RestRateLimiter {
     pub fn new() -> Self {
         RestRateLimiter {
@@ -113,6 +119,12 @@ struct AddrState {
     budget: u64,
     consumed: u64,
     last_throttled: Option<Instant>,
+}
+
+impl Default for AddressRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AddressRateLimiter {

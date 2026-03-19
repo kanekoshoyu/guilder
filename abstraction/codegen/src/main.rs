@@ -387,7 +387,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
             "\npub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;\n",
         );
     }
-    code.push_str("\n");
+    code.push('\n');
 
     // enums
     for en in &config.enums {
@@ -481,7 +481,7 @@ fn codegen_str_python(config: YamlConfig) -> String {
     } else {
         code.push_str("from typing import Iterator\n");
     }
-    code.push_str("\n");
+    code.push('\n');
 
     // enums
     for en in &config.enums {
@@ -492,7 +492,7 @@ fn codegen_str_python(config: YamlConfig) -> String {
         for (i, value) in en.values.iter().enumerate() {
             code.push_str(&format!("\t{} = {}\n", value.name, i + 1));
         }
-        code.push_str("\n");
+        code.push('\n');
     }
 
     // structs
@@ -513,7 +513,7 @@ fn codegen_str_python(config: YamlConfig) -> String {
 
         code.push_str(&format!("{}):\n", field_definitions));
         code.push_str(&init_body);
-        code.push_str("\n");
+        code.push('\n');
     }
 
     // traits
@@ -548,7 +548,7 @@ fn codegen_str_python(config: YamlConfig) -> String {
             code.push_str("\t\tpass\n\n");
         }
 
-        code.push_str("\n");
+        code.push('\n');
     }
 
     code

@@ -33,6 +33,12 @@ pub struct HyperliquidClient {
     rest_limiter: Arc<RestRateLimiter>,
 }
 
+impl Default for HyperliquidClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HyperliquidClient {
     pub fn new() -> Self {
         HyperliquidClient {
