@@ -383,21 +383,26 @@ where
     F: FnMut(WsEnvelope) -> Vec<T> + Send + 'static,
 {
     Box::pin(async_stream::stream! {
+        let mut backoff_secs: u64 = 1;
         loop {
             let ws = match connect_async(HYPERLIQUID_WS_URL).await {
                 Ok((ws, _)) => ws,
                 Err(e) => {
-                    yield Err(format!("ws connect failed: {e} — reconnecting in 5s"));
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    yield Err(format!("ws connect failed: {e} — reconnecting in {backoff_secs}s"));
+                    tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                    backoff_secs = (backoff_secs * 2).min(60);
                     continue;
                 }
             };
             let (mut sink, mut stream) = ws.split();
             if let Err(e) = sink.send(Message::Text(subscription.to_string().into())).await {
-                yield Err(format!("ws subscribe failed: {e} — reconnecting in 5s"));
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                yield Err(format!("ws subscribe failed: {e} — reconnecting in {backoff_secs}s"));
+                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(60);
                 continue;
             }
+            // Connected successfully — reset backoff
+            backoff_secs = 1;
             let mut ping_interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + std::time::Duration::from_secs(50),
                 std::time::Duration::from_secs(50),
@@ -407,7 +412,7 @@ where
                 tokio::select! {
                     _ = ping_interval.tick() => {
                         if let Err(e) = sink.send(Message::Text(r#"{"method":"ping"}"#.to_string().into())).await {
-                            yield Err(format!("ws ping failed: {e} — reconnecting in 5s"));
+                            yield Err(format!("ws ping failed: {e} — reconnecting in {backoff_secs}s"));
                             should_reconnect = true;
                             break;
                         }
@@ -415,18 +420,18 @@ where
                     msg = stream.next() => {
                         match msg {
                             None => {
-                                yield Err("ws stream ended — reconnecting in 5s".to_string());
+                                yield Err(format!("ws stream ended — reconnecting in {backoff_secs}s"));
                                 should_reconnect = true;
                                 break;
                             }
                             Some(Err(e)) => {
-                                yield Err(format!("ws error: {e} — reconnecting in 5s"));
+                                yield Err(format!("ws error: {e} — reconnecting in {backoff_secs}s"));
                                 should_reconnect = true;
                                 break;
                             }
                             Some(Ok(Message::Ping(data))) => { let _ = sink.send(Message::Pong(data)).await; }
                             Some(Ok(Message::Close(_))) => {
-                                yield Err("websocket closed — reconnecting in 5s".to_string());
+                                yield Err(format!("websocket closed — reconnecting in {backoff_secs}s"));
                                 should_reconnect = true;
                                 break;
                             }
@@ -450,7 +455,8 @@ where
                 }
             }
             if should_reconnect {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(60);
             }
         }
     })
