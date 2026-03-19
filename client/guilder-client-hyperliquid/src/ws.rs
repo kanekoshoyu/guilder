@@ -18,11 +18,12 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 10;
 const PONG_TIMEOUT_SECS: u64 = 30;
 const PING_INTERVAL_SECS: u64 = 50;
 
-/// Unique subscription identifier (channel + coin).
+/// Unique subscription identifier (channel + routing key).
+/// Routing key can be a coin string (e.g. "BTC") or user address (e.g. "0x...").
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct SubKey {
     pub channel: String,
-    pub coin: String,
+    pub routing_key: String,
 }
 
 /// Subscription request sent to the WsMux actor.
@@ -43,7 +44,7 @@ struct WsEnvelope {
 /// WebSocket multiplexer.
 ///
 /// Manages a single shared WebSocket connection and routes incoming messages
-/// to subscribers by (channel, coin).
+/// to subscribers by (channel, routing_key).
 pub(crate) struct WsMux {
     /// Channel to send subscription requests to the actor task.
     req_tx: mpsc::UnboundedSender<SubRequest>,
@@ -57,7 +58,7 @@ impl WsMux {
         WsMux { req_tx }
     }
 
-    /// Subscribe to (channel, coin) and return a BoxStream of JSON strings.
+    /// Subscribe to (channel, routing_key) and return a BoxStream of JSON strings.
     pub(crate) fn subscribe(
         &self,
         key: SubKey,
@@ -83,7 +84,7 @@ impl WsMux {
 /// Actor task that manages the single WebSocket connection.
 ///
 /// Receives SubRequests, maintains active subscriptions, routes incoming
-/// messages to the correct subscriber by (channel, coin), and handles
+/// messages to the correct subscriber by (channel, routing_key), and handles
 /// reconnection with exponential backoff.
 async fn ws_actor(mut req_rx: mpsc::UnboundedReceiver<SubRequest>) {
     let mut backoff_secs: u64 = 1;
@@ -213,16 +214,30 @@ async fn ws_actor(mut req_rx: mpsc::UnboundedReceiver<SubRequest>) {
                                 }
                                 "subscriptionResponse" => {}
                                 _ => {
-                                    // Extract coin from envelope data
-                                    if let Some(coin) = env.data.get("coin").and_then(|c| c.as_str()) {
-                                        let subs = subscriptions.read().await;
+                                    // Extract routing key from envelope data (try coin first, then user)
+                                    let routing_key = env.data.get("coin").and_then(|c| c.as_str())
+                                        .or_else(|| env.data.get("user").and_then(|u| u.as_str()));
+
+                                    let subs = subscriptions.read().await;
+                                    if let Some(key_str) = routing_key {
                                         let key = SubKey {
                                             channel: env.channel.clone(),
-                                            coin: coin.to_string(),
+                                            routing_key: key_str.to_string(),
                                         };
                                         if let Some(senders) = subs.get(&key) {
                                             for sender in senders {
                                                 let _ = sender.send(text_str.clone());
+                                            }
+                                        }
+                                    } else {
+                                        // No routing key in message (e.g. userEvents,
+                                        // orderUpdates) — fan out to all subscribers
+                                        // of this channel.
+                                        for (key, senders) in subs.iter() {
+                                            if key.channel == env.channel {
+                                                for sender in senders {
+                                                    let _ = sender.send(text_str.clone());
+                                                }
                                             }
                                         }
                                     }

@@ -1,6 +1,6 @@
 use crate::rate_limiter::RestRateLimiter;
 use alloy_primitives::Address;
-use futures_util::{stream, SinkExt, StreamExt};
+use futures_util::{stream, StreamExt};
 use guilder_abstraction::{
     self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation, OpenOrder,
     OrderPlacement, OrderSide, OrderStatus, OrderType, OrderUpdate, Position, PredictedFunding,
@@ -13,11 +13,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-
 const HYPERLIQUID_INFO_URL: &str = "https://api.hyperliquid.xyz/info";
 const HYPERLIQUID_EXCHANGE_URL: &str = "https://api.hyperliquid.xyz/exchange";
-const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
 async fn parse_response<T: for<'de> serde::Deserialize<'de>>(
     resp: reqwest::Response,
@@ -432,119 +429,6 @@ fn sign_action(
     Ok((r, s, v))
 }
 
-/// Generic WebSocket subscription helper.
-///
-/// Connects to the Hyperliquid WS endpoint, sends `subscription`, then drives the read loop:
-/// - Replies to server `Ping` frames with `Pong`.
-/// - Sends an application-level `{"method":"ping"}` every 50 s to keep the connection alive.
-/// - Surfaces connect / send / protocol errors as `Err` items, then **reconnects after 5 s**.
-/// - Calls `parse(envelope)` for each `Text` message; non-empty `Vec`s become `Ok` items.
-///   Non-envelope messages (e.g. pong responses) are silently skipped.
-fn ws_subscribe<T, F>(subscription: Value, mut parse: F) -> BoxStream<Result<T, String>>
-where
-    T: Send + 'static,
-    F: FnMut(WsEnvelope) -> Vec<T> + Send + 'static,
-{
-    Box::pin(async_stream::stream! {
-        const MAX_RECONNECT_ATTEMPTS: u32 = 10;
-        const PONG_TIMEOUT_SECS: u64 = 30;
-        let mut backoff_secs: u64 = 1;
-        let mut reconnect_attempts: u32 = 0;
-        loop {
-            if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS {
-                yield Err(format!("ws max reconnect attempts ({MAX_RECONNECT_ATTEMPTS}) reached — giving up"));
-                break;
-            }
-            let ws = match connect_async(HYPERLIQUID_WS_URL).await {
-                Ok((ws, _)) => ws,
-                Err(e) => {
-                    reconnect_attempts += 1;
-                    yield Err(format!("ws connect failed: {e} — reconnecting in {backoff_secs}s ({reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"));
-                    tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
-                    backoff_secs = (backoff_secs * 2).min(60);
-                    continue;
-                }
-            };
-            let (mut sink, mut stream) = ws.split();
-            if let Err(e) = sink.send(Message::Text(subscription.to_string().into())).await {
-                reconnect_attempts += 1;
-                yield Err(format!("ws subscribe failed: {e} — reconnecting in {backoff_secs}s ({reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"));
-                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
-                backoff_secs = (backoff_secs * 2).min(60);
-                continue;
-            }
-            // Connected successfully — reset backoff and attempt counter
-            backoff_secs = 1;
-            reconnect_attempts = 0;
-            let mut ping_interval = tokio::time::interval_at(
-                tokio::time::Instant::now() + std::time::Duration::from_secs(50),
-                std::time::Duration::from_secs(50),
-            );
-            let mut pong_deadline: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
-            let should_reconnect;
-            loop {
-                tokio::select! {
-                    _ = ping_interval.tick() => {
-                        if let Err(e) = sink.send(Message::Text(r#"{"method":"ping"}"#.to_string().into())).await {
-                            yield Err(format!("ws ping failed: {e} — reconnecting in {backoff_secs}s"));
-                            should_reconnect = true;
-                            break;
-                        }
-                        pong_deadline = Some(Box::pin(tokio::time::sleep(
-                            std::time::Duration::from_secs(PONG_TIMEOUT_SECS),
-                        )));
-                    }
-                    _ = async { pong_deadline.as_mut().unwrap().await }, if pong_deadline.is_some() => {
-                        yield Err(format!("ws pong timeout ({PONG_TIMEOUT_SECS}s) — reconnecting in {backoff_secs}s"));
-                        should_reconnect = true;
-                        break;
-                    }
-                    msg = stream.next() => {
-                        match msg {
-                            None => {
-                                yield Err(format!("ws stream ended — reconnecting in {backoff_secs}s"));
-                                should_reconnect = true;
-                                break;
-                            }
-                            Some(Err(e)) => {
-                                yield Err(format!("ws error: {e} — reconnecting in {backoff_secs}s"));
-                                should_reconnect = true;
-                                break;
-                            }
-                            Some(Ok(Message::Ping(data))) => { let _ = sink.send(Message::Pong(data)).await; }
-                            Some(Ok(Message::Close(_))) => {
-                                yield Err(format!("websocket closed — reconnecting in {backoff_secs}s"));
-                                should_reconnect = true;
-                                break;
-                            }
-                            Some(Ok(Message::Text(text))) => {
-                                let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                                    yield Err(format!("unexpected ws message: {text}"));
-                                    continue;
-                                };
-                                match env.channel.as_str() {
-                                    "pong" => { pong_deadline = None; }
-                                    "subscriptionResponse" => {}
-                                    _ => {
-                                        for item in parse(env) {
-                                            yield Ok(item);
-                                        }
-                                    }
-                                }
-                            }
-                            Some(Ok(_)) => {}
-                        }
-                    }
-                }
-            }
-            if should_reconnect {
-                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
-                backoff_secs = (backoff_secs * 2).min(60);
-            }
-        }
-    })
-}
-
 // --- Trait implementations ---
 
 #[allow(async_fn_in_trait)]
@@ -917,7 +801,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
         });
         let key = crate::ws::SubKey {
             channel: "l2Book".to_string(),
-            coin: symbol,
+            routing_key: symbol,
         };
         let stream = self.ws_mux.subscribe(key, sub);
         Box::pin(async_stream::stream! {
@@ -968,7 +852,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
         });
         let key = crate::ws::SubKey {
             channel: "activeAssetCtx".to_string(),
-            coin: symbol,
+            routing_key: symbol,
         };
         let stream = self.ws_mux.subscribe(key, sub);
         Box::pin(async_stream::stream! {
@@ -1009,32 +893,41 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>> {
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "userEvents", "user": user}
+            "subscription": {"type": "userEvents", "user": user.clone()}
         });
-        ws_subscribe(sub, |env| {
+        let key = crate::ws::SubKey {
+            channel: "userEvents".to_string(),
+            routing_key: user,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
             if env.channel != "userEvents" {
-                return vec![];
+                return None;
             }
             let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
-                return vec![];
+                return None;
             };
             let Some(liq) = event.liquidation else {
-                return vec![];
+                return None;
             };
             let (Some(notional_position), Some(account_value)) = (
                 parse_decimal(&liq.liquidated_ntl_pos),
                 parse_decimal(&liq.liquidated_account_value),
             ) else {
-                return vec![];
+                return None;
             };
-            vec![Liquidation {
+            let item = Liquidation {
                 symbol: String::new(),
                 side: OrderSide::Sell,
                 liquidated_user: liq.liquidated_user,
                 notional_position,
                 account_value,
-            }]
-        })
+            };
+            Some(stream::iter(vec![Ok(item)].into_iter()))
+        }).flatten())
     }
 
     fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>> {
@@ -1044,7 +937,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
         });
         let key = crate::ws::SubKey {
             channel: "trades".to_string(),
-            coin: symbol,
+            routing_key: symbol,
         };
         let stream = self.ws_mux.subscribe(key, sub);
         Box::pin(async_stream::stream! {
@@ -1182,18 +1075,27 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
         let Some(addr) = self.user_address else {
             return Box::pin(stream::empty());
         };
+        let addr_str = format!("{:#x}", addr);
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "userEvents", "user": format!("{:#x}", addr)}
+            "subscription": {"type": "userEvents", "user": addr_str.clone()}
         });
-        ws_subscribe(sub, |env| {
+        let key = crate::ws::SubKey {
+            channel: "userEvents".to_string(),
+            routing_key: addr_str,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
             if env.channel != "userEvents" {
-                return vec![];
+                return None;
             }
             let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
-                return vec![];
+                return None;
             };
-            event
+            let items: Vec<_> = event
                 .fills
                 .unwrap_or_default()
                 .into_iter()
@@ -1216,26 +1118,40 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                         timestamp_ms: fill.time,
                     })
                 })
-                .collect()
-        })
+                .collect();
+            if items.is_empty() {
+                None
+            } else {
+                Some(stream::iter(items.into_iter().map(Ok)))
+            }
+        }).flatten())
     }
 
     fn subscribe_order_updates(&self) -> BoxStream<Result<OrderUpdate, String>> {
         let Some(addr) = self.user_address else {
             return Box::pin(stream::empty());
         };
+        let addr_str = format!("{:#x}", addr);
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "orderUpdates", "user": format!("{:#x}", addr)}
+            "subscription": {"type": "orderUpdates", "user": addr_str.clone()}
         });
-        ws_subscribe(sub, |env| {
+        let key = crate::ws::SubKey {
+            channel: "orderUpdates".to_string(),
+            routing_key: addr_str,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
             if env.channel != "orderUpdates" {
-                return vec![];
+                return None;
             }
             let Ok(updates) = serde_json::from_value::<Vec<WsOrderUpdate>>(env.data) else {
-                return vec![];
+                return None;
             };
-            updates
+            let items: Vec<_> = updates
                 .into_iter()
                 .map(|upd| {
                     let status = match upd.status.as_str() {
@@ -1260,55 +1176,79 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                         timestamp_ms: upd.status_timestamp,
                     }
                 })
-                .collect()
-        })
+                .collect();
+            if items.is_empty() {
+                None
+            } else {
+                Some(stream::iter(items.into_iter().map(Ok)))
+            }
+        }).flatten())
     }
 
     fn subscribe_funding_payments(&self) -> BoxStream<Result<FundingPayment, String>> {
         let Some(addr) = self.user_address else {
             return Box::pin(stream::empty());
         };
+        let addr_str = format!("{:#x}", addr);
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "userEvents", "user": format!("{:#x}", addr)}
+            "subscription": {"type": "userEvents", "user": addr_str.clone()}
         });
-        ws_subscribe(sub, |env| {
+        let key = crate::ws::SubKey {
+            channel: "userEvents".to_string(),
+            routing_key: addr_str,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
             if env.channel != "userEvents" {
-                return vec![];
+                return None;
             }
             let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
-                return vec![];
+                return None;
             };
             let Some(funding) = event.funding else {
-                return vec![];
+                return None;
             };
             let Some(amount_usd) = parse_decimal(&funding.usdc) else {
-                return vec![];
+                return None;
             };
-            vec![FundingPayment {
+            let item = FundingPayment {
                 symbol: funding.coin,
                 amount_usd,
                 timestamp_ms: funding.time,
-            }]
-        })
+            };
+            Some(stream::iter(vec![Ok(item)].into_iter()))
+        }).flatten())
     }
 
     fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>> {
         let Some(addr) = self.user_address else {
             return Box::pin(stream::empty());
         };
+        let addr_str = format!("{:#x}", addr);
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "userNonFundingLedgerUpdates", "user": format!("{:#x}", addr)}
+            "subscription": {"type": "userNonFundingLedgerUpdates", "user": addr_str.clone()}
         });
-        ws_subscribe(sub, |env| {
+        let key = crate::ws::SubKey {
+            channel: "userNonFundingLedgerUpdates".to_string(),
+            routing_key: addr_str,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
             if env.channel != "userNonFundingLedgerUpdates" {
-                return vec![];
+                return None;
             }
             let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else {
-                return vec![];
+                return None;
             };
-            ledger
+            let items: Vec<_> = ledger
                 .updates
                 .into_iter()
                 .filter_map(|e| {
@@ -1322,26 +1262,40 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                         timestamp_ms: e.time,
                     })
                 })
-                .collect()
-        })
+                .collect();
+            if items.is_empty() {
+                None
+            } else {
+                Some(stream::iter(items.into_iter().map(Ok)))
+            }
+        }).flatten())
     }
 
     fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
         let Some(addr) = self.user_address else {
             return Box::pin(stream::empty());
         };
+        let addr_str = format!("{:#x}", addr);
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "userNonFundingLedgerUpdates", "user": format!("{:#x}", addr)}
+            "subscription": {"type": "userNonFundingLedgerUpdates", "user": addr_str.clone()}
         });
-        ws_subscribe(sub, |env| {
+        let key = crate::ws::SubKey {
+            channel: "userNonFundingLedgerUpdates".to_string(),
+            routing_key: addr_str,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
             if env.channel != "userNonFundingLedgerUpdates" {
-                return vec![];
+                return None;
             }
             let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else {
-                return vec![];
+                return None;
             };
-            ledger
+            let items: Vec<_> = ledger
                 .updates
                 .into_iter()
                 .filter_map(|e| {
@@ -1355,7 +1309,12 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                         timestamp_ms: e.time,
                     })
                 })
-                .collect()
-        })
+                .collect();
+            if items.is_empty() {
+                None
+            } else {
+                Some(stream::iter(items.into_iter().map(Ok)))
+            }
+        }).flatten())
     }
 }
