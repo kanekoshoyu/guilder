@@ -11,7 +11,9 @@ async fn test_subscribe_l2_update_receives_events() {
     let mut stream = client.subscribe_l2_update("BTC".to_string());
 
     let event = timeout(Duration::from_secs(5), stream.next()).await;
-    let event = event.expect("timed out waiting for L2 update").expect("stream ended early");
+    let event = event
+        .expect("timed out waiting for L2 update")
+        .expect("stream ended early");
 
     assert_eq!(event.symbol, "BTC");
     assert!(event.price > 0.0, "price should be positive");
@@ -26,7 +28,9 @@ async fn test_subscribe_fill_receives_events() {
     let mut stream = client.subscribe_fill("BTC".to_string());
 
     let event = timeout(Duration::from_secs(30), stream.next()).await;
-    let event = event.expect("timed out waiting for fill").expect("stream ended early");
+    let event = event
+        .expect("timed out waiting for fill")
+        .expect("stream ended early");
 
     assert_eq!(event.symbol, "BTC");
     assert!(event.price > 0.0, "price should be positive");

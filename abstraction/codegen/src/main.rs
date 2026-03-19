@@ -145,15 +145,27 @@ impl ValueType {
                 Self::String => "String".into(),
                 Self::Unit => "()".into(),
                 Self::Stream(item_type) => {
-                    format!("BoxStream<{}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
+                    format!(
+                        "BoxStream<{}>",
+                        item_type.to_string_async(ProgrammingLanguage::Rust, is_async)
+                    )
                 }
                 Self::Iter(item_type) => {
-                    format!("impl Iterator<Item = {}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
+                    format!(
+                        "impl Iterator<Item = {}>",
+                        item_type.to_string_async(ProgrammingLanguage::Rust, is_async)
+                    )
                 }
                 Self::List(item_type) => {
-                    format!("Vec<{}>", item_type.to_string_async(ProgrammingLanguage::Rust, is_async))
+                    format!(
+                        "Vec<{}>",
+                        item_type.to_string_async(ProgrammingLanguage::Rust, is_async)
+                    )
                 }
-                Self::Map { key_type, value_type } => {
+                Self::Map {
+                    key_type,
+                    value_type,
+                } => {
                     format!(
                         "HashMap<{}, {}>",
                         key_type.to_string_async(ProgrammingLanguage::Rust, is_async),
@@ -192,9 +204,15 @@ impl ValueType {
                     }
                 }
                 Self::List(item_type) => {
-                    format!("list[{}]", item_type.to_string_async(ProgrammingLanguage::Python, is_async))
+                    format!(
+                        "list[{}]",
+                        item_type.to_string_async(ProgrammingLanguage::Python, is_async)
+                    )
                 }
-                Self::Map { key_type, value_type } => {
+                Self::Map {
+                    key_type,
+                    value_type,
+                } => {
                     format!(
                         "dict[{}, {}]",
                         key_type.to_string_async(ProgrammingLanguage::Python, is_async),
@@ -306,8 +324,13 @@ fn parse_yaml(file_path: impl AsRef<std::path::Path>) -> YamlConfig {
 fn uses_decimal(vt: &ValueType) -> bool {
     match vt {
         ValueType::Decimal => true,
-        ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => uses_decimal(inner),
-        ValueType::Map { key_type, value_type } => uses_decimal(key_type) || uses_decimal(value_type),
+        ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => {
+            uses_decimal(inner)
+        }
+        ValueType::Map {
+            key_type,
+            value_type,
+        } => uses_decimal(key_type) || uses_decimal(value_type),
         _ => false,
     }
 }
@@ -320,31 +343,49 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     fn uses_map(vt: &ValueType) -> bool {
         match vt {
             ValueType::Map { .. } => true,
-            ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => uses_map(inner),
+            ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => {
+                uses_map(inner)
+            }
             _ => false,
         }
     }
-    let has_map = config.structs.iter().any(|s| s.values.iter().any(|v| uses_map(&v.value_type)))
-        || config.traits.iter().any(|tr| tr.methods.iter().any(|m| {
-            uses_map(&m.return_type) || m.args.iter().any(|a| uses_map(&a.arg_type))
-        }));
+    let has_map = config
+        .structs
+        .iter()
+        .any(|s| s.values.iter().any(|v| uses_map(&v.value_type)))
+        || config.traits.iter().any(|tr| {
+            tr.methods
+                .iter()
+                .any(|m| uses_map(&m.return_type) || m.args.iter().any(|a| uses_map(&a.arg_type)))
+        });
     if has_map {
         code.push_str("use std::collections::HashMap;\n");
     }
     let has_stream = config.traits.iter().any(|tr| {
-        tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
+        tr.r#async
+            && tr
+                .methods
+                .iter()
+                .any(|m| matches!(m.return_type, ValueType::Stream(_)))
     });
-    let has_decimal = config.structs.iter().any(|s| s.values.iter().any(|v| uses_decimal(&v.value_type)))
-        || config.traits.iter().any(|tr| tr.methods.iter().any(|m| {
-            uses_decimal(&m.return_type) || m.args.iter().any(|a| uses_decimal(&a.arg_type))
-        }));
+    let has_decimal = config
+        .structs
+        .iter()
+        .any(|s| s.values.iter().any(|v| uses_decimal(&v.value_type)))
+        || config.traits.iter().any(|tr| {
+            tr.methods.iter().any(|m| {
+                uses_decimal(&m.return_type) || m.args.iter().any(|a| uses_decimal(&a.arg_type))
+            })
+        });
     if has_decimal {
         code.push_str("use rust_decimal::Decimal;\n");
     }
     if has_stream {
         code.push_str("use std::pin::Pin;\n");
         code.push_str("use futures_core::Stream;\n");
-        code.push_str("\npub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;\n");
+        code.push_str(
+            "\npub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;\n",
+        );
     }
     code.push_str("\n");
 
@@ -393,19 +434,24 @@ fn codegen_str_rust(config: YamlConfig) -> String {
 
         for method in tr.methods {
             let mut args: Vec<String> = vec!["&self".to_string()];
-            args.extend(
-                method
-                    .args
-                    .iter()
-                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string_async(language, tr.r#async))),
-            );
+            args.extend(method.args.iter().map(|arg| {
+                format!(
+                    "{}: {}",
+                    arg.name,
+                    arg.arg_type.to_string_async(language, tr.r#async)
+                )
+            }));
             let args_str = args.join(", ");
 
             if let Some(description) = method.description {
                 code.push_str(&format!("\t/// {}\n", description));
             }
             let is_streaming = matches!(method.return_type, ValueType::Stream(_));
-            let fn_keyword = if tr.r#async && !is_streaming { "async fn" } else { "fn" };
+            let fn_keyword = if tr.r#async && !is_streaming {
+                "async fn"
+            } else {
+                "fn"
+            };
             code.push_str(&format!(
                 "\t{} {}({}) -> {};\n",
                 fn_keyword,
@@ -478,12 +524,13 @@ fn codegen_str_python(config: YamlConfig) -> String {
         }
         for method in tr.methods {
             let mut args: Vec<String> = vec!["self".to_string()];
-            args.extend(
-                method
-                    .args
-                    .iter()
-                    .map(|arg| format!("{}: {}", arg.name, arg.arg_type.to_string_async(language, tr.r#async))),
-            );
+            args.extend(method.args.iter().map(|arg| {
+                format!(
+                    "{}: {}",
+                    arg.name,
+                    arg.arg_type.to_string_async(language, tr.r#async)
+                )
+            }));
             let args_str = args.join(", ");
 
             code.push_str("\t@abstractmethod\n");
@@ -553,7 +600,11 @@ fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
         ));
     }
     let has_stream = config.traits.iter().any(|tr| {
-        tr.r#async && tr.methods.iter().any(|m| matches!(m.return_type, ValueType::Stream(_)))
+        tr.r#async
+            && tr
+                .methods
+                .iter()
+                .any(|m| matches!(m.return_type, ValueType::Stream(_)))
     });
     if has_stream {
         code.push_str("use futures_util::stream;\n");
@@ -585,16 +636,25 @@ fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
         ));
         for method in &tr.methods {
             let mut args: Vec<String> = vec!["&self".to_string()];
-            args.extend(
-                method
-                    .args
-                    .iter()
-                    .map(|a| format!("{}: {}", a.name, a.arg_type.to_string_async(language, tr.r#async))),
-            );
+            args.extend(method.args.iter().map(|a| {
+                format!(
+                    "{}: {}",
+                    a.name,
+                    a.arg_type.to_string_async(language, tr.r#async)
+                )
+            }));
             let args_str = args.join(", ");
             let is_streaming = matches!(method.return_type, ValueType::Stream(_));
-            let fn_keyword = if tr.r#async && !is_streaming { "async fn" } else { "fn" };
-            let body = if is_streaming { "Box::pin(stream::empty())" } else { "Err(\"not implemented\".to_string())" };
+            let fn_keyword = if tr.r#async && !is_streaming {
+                "async fn"
+            } else {
+                "fn"
+            };
+            let body = if is_streaming {
+                "Box::pin(stream::empty())"
+            } else {
+                "Err(\"not implemented\".to_string())"
+            };
             code.push_str(&format!(
                 "    {} {}({}) -> {} {{\n        {}\n    }}\n\n",
                 fn_keyword,
@@ -624,7 +684,8 @@ futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn codegen_template(config: &YamlConfig, output_base: &str) {

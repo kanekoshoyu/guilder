@@ -53,9 +53,7 @@ async fn check_rest_asset_context(client: &HyperliquidClient) {
 /// WS: collect L2_SNAPSHOT_COUNT distinct snapshots (grouped by sequence number).
 /// Reports per-snapshot age relative to wall clock and gap between snapshots.
 async fn check_l2_freshness(client: &HyperliquidClient) {
-    println!(
-        "--- [2] WS subscribe_l2_update({SYMBOL}) — {L2_SNAPSHOT_COUNT} snapshots ---"
-    );
+    println!("--- [2] WS subscribe_l2_update({SYMBOL}) — {L2_SNAPSHOT_COUNT} snapshots ---");
 
     let mut stream = client.subscribe_l2_update(SYMBOL.to_string());
     let mut prev_wall: Option<Instant> = None;
@@ -109,9 +107,7 @@ async fn check_l2_freshness(client: &HyperliquidClient) {
         snapshots += 1;
     }
 
-    println!(
-        "  => {snapshots} snapshots from {total_events} raw events"
-    );
+    println!("  => {snapshots} snapshots from {total_events} raw events");
 }
 
 /// WS: collect ASSET_CTX_SAMPLE_COUNT asset context updates and report inter-update gaps.

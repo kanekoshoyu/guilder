@@ -1,7 +1,7 @@
-/// orderbook model
-pub mod orderbook;
 /// currency pair model, e.g. BTC-USDT
 pub mod currency_pair;
+/// orderbook model
+pub mod orderbook;
 
 /// use macro to simplify below
 pub use currency_pair::CurrencyPair;

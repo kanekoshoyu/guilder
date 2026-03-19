@@ -1,11 +1,15 @@
 [package]
 name = "guilder-client-hyperliquid"
-version = "0.1.14"
+version = "0.2.0"
 edition = "2021"
 description = "Hyperliquid client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
 repository = "https://github.com/kanekoshoyu/guilder"
 license = "MIT"
+
+[[bin]]
+name = "guilder-stress-test"
+path = "src/bin/guilder_stress_test.rs"
 
 [dependencies]
 # development: path, deployment: version
@@ -25,3 +29,4 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 sha3 = "0.10"
 hex = "0.4"
 rmp-serde = "1"
+tracing = "0.1"
