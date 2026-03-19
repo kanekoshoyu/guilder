@@ -31,6 +31,7 @@ pub struct HyperliquidClient {
     user_address: Option<Address>,
     private_key: Option<String>,
     rest_limiter: Arc<RestRateLimiter>,
+    ws_mux: crate::ws::WsMux,
 }
 
 impl Default for HyperliquidClient {
@@ -46,6 +47,7 @@ impl HyperliquidClient {
             user_address: None,
             private_key: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
+            ws_mux: crate::ws::WsMux::new(),
         }
     }
 
@@ -55,6 +57,7 @@ impl HyperliquidClient {
             user_address: Some(user_address),
             private_key: Some(private_key),
             rest_limiter: Arc::new(RestRateLimiter::new()),
+            ws_mux: crate::ws::WsMux::new(),
         }
     }
 
@@ -910,78 +913,96 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "l2Book", "coin": symbol}
+            "subscription": {"type": "l2Book", "coin": symbol.clone()}
         });
-        ws_subscribe(sub, |env| {
-            if env.channel != "l2Book" {
-                return vec![];
-            }
-            let Ok(book) = serde_json::from_value::<WsBook>(env.data) else {
-                return vec![];
-            };
-            let mut items = Vec::new();
-            for level in book.levels.first().into_iter().flatten() {
-                if let (Some(price), Some(volume)) =
-                    (parse_decimal(&level.px), parse_decimal(&level.sz))
-                {
-                    items.push(L2Update {
-                        symbol: book.coin.clone(),
-                        price,
-                        volume,
-                        side: Side::Ask,
-                        sequence: book.time,
-                    });
+        let key = crate::ws::SubKey {
+            channel: "l2Book".to_string(),
+            coin: symbol,
+        };
+        let stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(async_stream::stream! {
+            for await msg in stream {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&msg) else {
+                    continue;
+                };
+                if env.channel != "l2Book" {
+                    continue;
+                }
+                let Ok(book) = serde_json::from_value::<WsBook>(env.data) else {
+                    continue;
+                };
+                for level in book.levels.first().into_iter().flatten() {
+                    if let (Some(price), Some(volume)) =
+                        (parse_decimal(&level.px), parse_decimal(&level.sz))
+                    {
+                        yield Ok(L2Update {
+                            symbol: book.coin.clone(),
+                            price,
+                            volume,
+                            side: Side::Ask,
+                            sequence: book.time,
+                        });
+                    }
+                }
+                for level in book.levels.get(1).into_iter().flatten() {
+                    if let (Some(price), Some(volume)) =
+                        (parse_decimal(&level.px), parse_decimal(&level.sz))
+                    {
+                        yield Ok(L2Update {
+                            symbol: book.coin.clone(),
+                            price,
+                            volume,
+                            side: Side::Bid,
+                            sequence: book.time,
+                        });
+                    }
                 }
             }
-            for level in book.levels.get(1).into_iter().flatten() {
-                if let (Some(price), Some(volume)) =
-                    (parse_decimal(&level.px), parse_decimal(&level.sz))
-                {
-                    items.push(L2Update {
-                        symbol: book.coin.clone(),
-                        price,
-                        volume,
-                        side: Side::Bid,
-                        sequence: book.time,
-                    });
-                }
-            }
-            items
         })
     }
 
     fn subscribe_asset_context(&self, symbol: String) -> BoxStream<Result<AssetContext, String>> {
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "activeAssetCtx", "coin": symbol}
+            "subscription": {"type": "activeAssetCtx", "coin": symbol.clone()}
         });
-        ws_subscribe(sub, |env| {
-            if env.channel != "activeAssetCtx" {
-                return vec![];
+        let key = crate::ws::SubKey {
+            channel: "activeAssetCtx".to_string(),
+            coin: symbol,
+        };
+        let stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(async_stream::stream! {
+            for await msg in stream {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&msg) else {
+                    continue;
+                };
+                if env.channel != "activeAssetCtx" {
+                    continue;
+                }
+                let Ok(update) = serde_json::from_value::<WsAssetCtx>(env.data) else {
+                    continue;
+                };
+                let ctx = &update.ctx;
+                let (Some(open_interest), Some(funding_rate), Some(mark_price), Some(day_volume)) = (
+                    parse_decimal(&ctx.open_interest),
+                    parse_decimal(&ctx.funding),
+                    parse_decimal(&ctx.mark_px),
+                    parse_decimal(&ctx.day_ntl_vlm),
+                ) else {
+                    continue;
+                };
+                yield Ok(AssetContext {
+                    symbol: update.coin,
+                    open_interest,
+                    funding_rate,
+                    mark_price,
+                    day_volume,
+                    mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
+                    oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
+                    premium: ctx.premium.as_deref().and_then(parse_decimal),
+                    prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+                });
             }
-            let Ok(update) = serde_json::from_value::<WsAssetCtx>(env.data) else {
-                return vec![];
-            };
-            let ctx = &update.ctx;
-            let (Some(open_interest), Some(funding_rate), Some(mark_price), Some(day_volume)) = (
-                parse_decimal(&ctx.open_interest),
-                parse_decimal(&ctx.funding),
-                parse_decimal(&ctx.mark_px),
-                parse_decimal(&ctx.day_ntl_vlm),
-            ) else {
-                return vec![];
-            };
-            vec![AssetContext {
-                symbol: update.coin,
-                open_interest,
-                funding_rate,
-                mark_price,
-                day_volume,
-                mid_price: ctx.mid_px.as_deref().and_then(parse_decimal),
-                oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
-                premium: ctx.premium.as_deref().and_then(parse_decimal),
-                prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
-            }]
         })
     }
 
@@ -1019,35 +1040,44 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>> {
         let sub = serde_json::json!({
             "method": "subscribe",
-            "subscription": {"type": "trades", "coin": symbol}
+            "subscription": {"type": "trades", "coin": symbol.clone()}
         });
-        ws_subscribe(sub, |env| {
-            if env.channel != "trades" {
-                return vec![];
-            }
-            let Ok(trades) = serde_json::from_value::<Vec<WsTrade>>(env.data) else {
-                return vec![];
-            };
-            trades
-                .into_iter()
-                .filter_map(|trade| {
+        let key = crate::ws::SubKey {
+            channel: "trades".to_string(),
+            coin: symbol,
+        };
+        let stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(async_stream::stream! {
+            for await msg in stream {
+                let Ok(env) = serde_json::from_str::<WsEnvelope>(&msg) else {
+                    continue;
+                };
+                if env.channel != "trades" {
+                    continue;
+                }
+                let Ok(trades) = serde_json::from_value::<Vec<WsTrade>>(env.data) else {
+                    continue;
+                };
+                for trade in trades {
                     let side = if trade.side == "B" {
                         OrderSide::Buy
                     } else {
                         OrderSide::Sell
                     };
-                    let price = parse_decimal(&trade.px)?;
-                    let volume = parse_decimal(&trade.sz)?;
-                    Some(Fill {
-                        symbol: trade.coin,
-                        price,
-                        volume,
-                        side,
-                        timestamp_ms: trade.time,
-                        trade_id: trade.tid,
-                    })
-                })
-                .collect()
+                    let price = parse_decimal(&trade.px);
+                    let volume = parse_decimal(&trade.sz);
+                    if let (Some(price), Some(volume)) = (price, volume) {
+                        yield Ok(Fill {
+                            symbol: trade.coin,
+                            price,
+                            volume,
+                            side,
+                            timestamp_ms: trade.time,
+                            trade_id: trade.tid,
+                        });
+                    }
+                }
+            }
         })
     }
 }
