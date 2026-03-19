@@ -31,6 +31,10 @@ Unopinionated multi-language cross-exchange crypto trading library in Rust.
 - Generated code uses only the standard library
 - Core uses only standard + networking libraries by default; variants (dashmap, tokio) are feature-gated
 
+## TODOs
+
+Tracked in `.task/todo/` — one Markdown file per topic. Add new items there, not inline in code.
+
 ## Key Dependencies
 
 - `ordered-float` — ordered f64 for orderbook keys

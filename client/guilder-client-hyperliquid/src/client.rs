@@ -383,12 +383,20 @@ where
     F: FnMut(WsEnvelope) -> Vec<T> + Send + 'static,
 {
     Box::pin(async_stream::stream! {
+        const MAX_RECONNECT_ATTEMPTS: u32 = 10;
+        const PONG_TIMEOUT_SECS: u64 = 30;
         let mut backoff_secs: u64 = 1;
+        let mut reconnect_attempts: u32 = 0;
         loop {
+            if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS {
+                yield Err(format!("ws max reconnect attempts ({MAX_RECONNECT_ATTEMPTS}) reached — giving up"));
+                break;
+            }
             let ws = match connect_async(HYPERLIQUID_WS_URL).await {
                 Ok((ws, _)) => ws,
                 Err(e) => {
-                    yield Err(format!("ws connect failed: {e} — reconnecting in {backoff_secs}s"));
+                    reconnect_attempts += 1;
+                    yield Err(format!("ws connect failed: {e} — reconnecting in {backoff_secs}s ({reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"));
                     tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
                     backoff_secs = (backoff_secs * 2).min(60);
                     continue;
@@ -396,17 +404,20 @@ where
             };
             let (mut sink, mut stream) = ws.split();
             if let Err(e) = sink.send(Message::Text(subscription.to_string().into())).await {
-                yield Err(format!("ws subscribe failed: {e} — reconnecting in {backoff_secs}s"));
+                reconnect_attempts += 1;
+                yield Err(format!("ws subscribe failed: {e} — reconnecting in {backoff_secs}s ({reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"));
                 tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(60);
                 continue;
             }
-            // Connected successfully — reset backoff
+            // Connected successfully — reset backoff and attempt counter
             backoff_secs = 1;
+            reconnect_attempts = 0;
             let mut ping_interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + std::time::Duration::from_secs(50),
                 std::time::Duration::from_secs(50),
             );
+            let mut pong_deadline: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
             let should_reconnect;
             loop {
                 tokio::select! {
@@ -416,6 +427,14 @@ where
                             should_reconnect = true;
                             break;
                         }
+                        pong_deadline = Some(Box::pin(tokio::time::sleep(
+                            std::time::Duration::from_secs(PONG_TIMEOUT_SECS),
+                        )));
+                    }
+                    _ = async { pong_deadline.as_mut().unwrap().await }, if pong_deadline.is_some() => {
+                        yield Err(format!("ws pong timeout ({PONG_TIMEOUT_SECS}s) — reconnecting in {backoff_secs}s"));
+                        should_reconnect = true;
+                        break;
                     }
                     msg = stream.next() => {
                         match msg {
@@ -441,7 +460,8 @@ where
                                     continue;
                                 };
                                 match env.channel.as_str() {
-                                    "pong" | "subscriptionResponse" => {}
+                                    "pong" => { pong_deadline = None; }
+                                    "subscriptionResponse" => {}
                                     _ => {
                                         for item in parse(env) {
                                             yield Ok(item);
