@@ -58,8 +58,10 @@ Never edit the generated files directly — they will be overwritten on the next
 |---|---|---|
 | `TestServer` | Ping and server time | yes |
 | `GetMarketData` | Symbols, prices, orderbook snapshots | yes |
+| `GetAccountSnapshot` | Account state snapshot (collateral, positions, orders) | yes |
 | `ManageOrder` | Place, modify, cancel orders | yes |
-| `SubscribeMarketData` | Streaming L2 updates and fills via `Stream` | yes |
+| `SubscribeMarketData` | Streaming L2 updates, fills, asset context, liquidations via `BoxStream` | yes |
+| `SubscribeUserEvents` | Streaming user fills, order updates, funding, deposits, withdrawals via `BoxStream` | yes |
 
 ## Implementation status
 
@@ -67,8 +69,10 @@ Never edit the generated files directly — they will be overwritten on the next
 |---|---|---|
 | `TestServer` | ❌ | ✅ |
 | `GetMarketData` | ❌ | ✅ |
-| `ManageOrder` | ❌ | ❌ |
+| `GetAccountSnapshot` | ❌ | ✅ |
+| `ManageOrder` | ❌ | ✅ |
 | `SubscribeMarketData` | ❌ | ✅ |
+| `SubscribeUserEvents` | ❌ | ✅ |
 
 legend: ✅ complete, 🚧 partial, ❌ not started
 
@@ -91,6 +95,7 @@ legend: ✅ complete, 🚧 partial, ❌ not started
 - Generated abstraction code uses only the standard library.
 - All traits are async.
 - `Stream` return types (for subscriptions) stay as `fn` returning `impl Stream`, not `async fn`.
+- **Reconnection is a client responsibility.** WebSocket streams returned by `subscribe_*` methods auto-reconnect on connection loss (5 s delay). Consumers see transient `Err` items but the stream never terminates due to a dropped connection — they can treat the stream as logically persistent. This keeps reconnection logic out of higher-level engines and strategies.
 
 ## Why "Guilder"?
 
