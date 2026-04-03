@@ -70,8 +70,8 @@ impl HyperliquidClient {
     }
 
     /// POST to the info endpoint, consuming `weight` from the REST rate-limit budget.
-    async fn info_post(&self, body: Value, weight: u32) -> Result<reqwest::Response, String> {
-        self.rest_limiter.acquire_blocking(weight).await;
+    async fn info_post(&self, body: Value, weight: u32, call: &str) -> Result<reqwest::Response, String> {
+        self.rest_limiter.acquire_blocking(weight, call).await;
         self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&body)
@@ -82,8 +82,8 @@ impl HyperliquidClient {
 
     /// POST to the exchange endpoint, consuming `weight` from the REST rate-limit budget.
     /// Weight = 1 + floor(batch_length / 40).
-    async fn exchange_post(&self, body: Value, weight: u32) -> Result<reqwest::Response, String> {
-        self.rest_limiter.acquire_blocking(weight).await;
+    async fn exchange_post(&self, body: Value, weight: u32, call: &str) -> Result<reqwest::Response, String> {
+        self.rest_limiter.acquire_blocking(weight, call).await;
         self.client
             .post(HYPERLIQUID_EXCHANGE_URL)
             .json(&body)
@@ -107,7 +107,7 @@ impl HyperliquidClient {
     async fn get_asset_index(&self, symbol: &str) -> Result<usize, String> {
         // `meta` is an "all other info" request → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "meta"}), 20)
+            .info_post(serde_json::json!({"type": "meta"}), 20, "get_asset_index")
             .await?;
         let meta: MetaResponse = parse_response(resp).await?;
         meta.universe
@@ -137,7 +137,7 @@ impl HyperliquidClient {
         });
 
         // Single unbatched action → exchange weight 1
-        let resp = self.exchange_post(payload, 1).await?;
+        let resp = self.exchange_post(payload, 1, "submit_signed_action").await?;
 
         let body: Value = parse_response(resp).await?;
         if body["status"].as_str() == Some("err") {
@@ -447,7 +447,7 @@ impl guilder_abstraction::TestServer for HyperliquidClient {
     /// Sends a lightweight allMids request; returns true if the server responds 200 OK.
     async fn ping(&self) -> Result<bool, String> {
         // allMids → weight 2
-        self.info_post(serde_json::json!({"type": "allMids"}), 2)
+        self.info_post(serde_json::json!({"type": "allMids"}), 2, "ping")
             .await
             .map(|r| r.status().is_success())
     }
@@ -467,7 +467,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_symbol(&self) -> Result<Vec<String>, String> {
         // meta → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "meta"}), 20)
+            .info_post(serde_json::json!({"type": "meta"}), 20, "get_symbol")
             .await?;
         parse_response::<MetaResponse>(resp)
             .await
@@ -478,7 +478,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String> {
         // metaAndAssetCtxs → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20)
+            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20, "get_open_interest")
             .await?;
         let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
             .await?
@@ -495,7 +495,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String> {
         // metaAndAssetCtxs → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20)
+            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20, "get_asset_context")
             .await?;
         let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
             .await?
@@ -526,7 +526,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String> {
         // metaAndAssetCtxs → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20)
+            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20, "get_all_asset_contexts")
             .await?;
         let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
             .await?
@@ -565,7 +565,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
         // l2Book → weight 2
         let resp = self
-            .info_post(serde_json::json!({"type": "l2Book", "coin": symbol}), 2)
+            .info_post(serde_json::json!({"type": "l2Book", "coin": symbol}), 2, "get_l2_orderbook")
             .await?;
         let book: Option<WsBook> = parse_response(resp).await?;
         let book = match book {
@@ -606,7 +606,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_price(&self, symbol: String) -> Result<Decimal, String> {
         // allMids → weight 2
         let resp = self
-            .info_post(serde_json::json!({"type": "allMids"}), 2)
+            .info_post(serde_json::json!({"type": "allMids"}), 2, "get_price")
             .await?;
         parse_response::<HashMap<String, String>>(resp)
             .await?
@@ -620,7 +620,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_predicted_fundings(&self) -> Result<Vec<PredictedFunding>, String> {
         // predictedFundings → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "predictedFundings"}), 20)
+            .info_post(serde_json::json!({"type": "predictedFundings"}), 20, "get_predicted_fundings")
             .await?;
         let data: PredictedFundingsResponse = parse_response(resp).await?;
         let mut result = Vec::new();
@@ -714,7 +714,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // openOrders → weight 20; get_asset_index → meta weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20)
+            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "change_order_by_cloid")
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders
@@ -751,7 +751,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // openOrders → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20)
+            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "cancel_order")
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders
@@ -776,7 +776,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // openOrders → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20)
+            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "cancel_all_order")
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         if orders.is_empty() {
@@ -785,7 +785,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // meta → weight 20
         let meta_resp = self
-            .info_post(serde_json::json!({"type": "meta"}), 20)
+            .info_post(serde_json::json!({"type": "meta"}), 20, "cancel_all_order")
             .await?;
         let meta: MetaResponse = parse_response(meta_resp).await?;
 
@@ -997,6 +997,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             .info_post(
                 serde_json::json!({"type": "clearinghouseState", "user": user}),
                 2,
+                "get_positions",
             )
             .await?;
         let state: ClearinghouseStateResponse = parse_response(resp).await?;
@@ -1036,7 +1037,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
         let user = self.require_user_address()?;
         // openOrders → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20)
+            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "get_open_orders")
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
 
@@ -1072,6 +1073,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             .info_post(
                 serde_json::json!({"type": "clearinghouseState", "user": user}),
                 2,
+                "get_collateral",
             )
             .await?;
         let state: ClearinghouseStateResponse = parse_response(resp).await?;

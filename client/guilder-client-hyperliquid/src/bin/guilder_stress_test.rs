@@ -229,7 +229,7 @@ async fn rest_worker(id: usize, counters: Arc<RestCounters>, limiter: Arc<RestRa
     let http = reqwest::Client::new();
     loop {
         let t0 = Instant::now();
-        limiter.acquire_blocking(2).await; // allMids → weight 2
+        limiter.acquire_blocking(2, "stress_test_allMids").await; // allMids → weight 2
         if t0.elapsed() > Duration::from_millis(50) {
             counters.throttle_waits.fetch_add(1, Ordering::Relaxed);
         }

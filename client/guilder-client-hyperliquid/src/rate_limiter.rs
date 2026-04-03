@@ -93,12 +93,20 @@ impl RestRateLimiter {
     }
 
     /// Retries on `Err`, logging each wait. Resolves once the request is accepted.
-    pub async fn acquire_blocking(&self, weight: u32) {
+    pub async fn acquire_blocking(&self, weight: u32, call: &str) {
         loop {
             match self.acquire(weight).await {
                 Ok(()) => return,
                 Err(e) => {
+                    let used = {
+                        let entries = self.entries.lock().await;
+                        entries.iter().map(|(_, w)| w).sum::<u32>()
+                    };
                     tracing::warn!(
+                        call,
+                        weight,
+                        used,
+                        budget = self.max_weight,
                         retry_after_ms = e.retry_after.as_millis(),
                         "REST rate limited"
                     );
