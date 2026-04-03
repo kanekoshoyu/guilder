@@ -1,4 +1,4 @@
-use crate::rate_limiter::RestRateLimiter;
+use crate::rate_limiter::{RestRateLimiter, AddressRateLimiter};
 use alloy_primitives::Address;
 use futures_util::{stream, StreamExt};
 use guilder_abstraction::{
@@ -28,6 +28,7 @@ pub struct HyperliquidClient {
     user_address: Option<Address>,
     private_key: Option<String>,
     rest_limiter: Arc<RestRateLimiter>,
+    address_limiter: Arc<AddressRateLimiter>,
     ws_mux: crate::ws::WsMux,
 }
 
@@ -44,6 +45,7 @@ impl HyperliquidClient {
             user_address: None,
             private_key: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
+            address_limiter: Arc::new(AddressRateLimiter::new()),
             ws_mux: crate::ws::WsMux::new(),
         }
     }
@@ -54,8 +56,17 @@ impl HyperliquidClient {
             user_address: Some(user_address),
             private_key: Some(private_key),
             rest_limiter: Arc::new(RestRateLimiter::new()),
+            address_limiter: Arc::new(AddressRateLimiter::new()),
             ws_mux: crate::ws::WsMux::new(),
         }
+    }
+
+    /// Configure rate limit budgets (rest_weight/min, address_requests).
+    /// Defaults: 1200 rest weight/min, 10000 address requests.
+    pub fn with_budgets(mut self, rest_weight: u32, addr_budget: u64) -> Self {
+        self.rest_limiter = Arc::new(RestRateLimiter::new_with_budget(rest_weight));
+        self.address_limiter = Arc::new(AddressRateLimiter::new_with_budget(addr_budget));
+        self
     }
 
     /// POST to the info endpoint, consuming `weight` from the REST rate-limit budget.

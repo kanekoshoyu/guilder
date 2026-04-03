@@ -47,6 +47,7 @@ impl std::error::Error for RateLimitError {}
 
 pub struct RestRateLimiter {
     entries: Mutex<VecDeque<(Instant, u32)>>,
+    max_weight: u32,
 }
 
 impl Default for RestRateLimiter {
@@ -57,8 +58,13 @@ impl Default for RestRateLimiter {
 
 impl RestRateLimiter {
     pub fn new() -> Self {
+        Self::new_with_budget(MAX_WEIGHT)
+    }
+
+    pub fn new_with_budget(max_weight: u32) -> Self {
         RestRateLimiter {
             entries: Mutex::new(VecDeque::new()),
+            max_weight,
         }
     }
 
@@ -76,7 +82,7 @@ impl RestRateLimiter {
         }
 
         let used: u32 = entries.iter().map(|(_, w)| w).sum();
-        if used + weight <= MAX_WEIGHT {
+        if used + weight <= self.max_weight {
             entries.push_back((now, weight));
             return Ok(());
         }
@@ -129,9 +135,13 @@ impl Default for AddressRateLimiter {
 
 impl AddressRateLimiter {
     pub fn new() -> Self {
+        Self::new_with_budget(ADDR_INITIAL_BUFFER)
+    }
+
+    pub fn new_with_budget(initial_budget: u64) -> Self {
         AddressRateLimiter {
             inner: Mutex::new(AddrState {
-                budget: ADDR_INITIAL_BUFFER,
+                budget: initial_budget,
                 consumed: 0,
                 last_throttled: None,
             }),
