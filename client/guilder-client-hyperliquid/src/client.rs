@@ -292,6 +292,9 @@ struct WsUserFill {
     time: i64,
     oid: i64,
     fee: String,
+    /// Client order ID assigned at placement, if any.
+    #[serde(default)]
+    cloid: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -328,6 +331,9 @@ struct WsOrderInfo {
     sz: String,
     oid: i64,
     orig_sz: String,
+    /// Client order ID assigned at placement, if any.
+    #[serde(default)]
+    cloid: Option<String>,
 }
 
 // --- WebSocket ledger update shapes (deposits / withdrawals) ---
@@ -645,6 +651,10 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
 impl guilder_abstraction::ManageOrder for HyperliquidClient {
     /// Places an order on Hyperliquid. Requires `with_auth`. Returns an `OrderPlacement` with
     /// the exchange-assigned order ID. Market orders are submitted as aggressive limit orders (IOC).
+    ///
+    /// If `cloid` is provided, Hyperliquid attaches it to the order lifecycle — fills and order
+    /// updates will carry the same cloid back, enabling end-to-end intent tracing without a
+    /// separate order_id mapping.
     async fn place_order(
         &self,
         symbol: String,
@@ -653,6 +663,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         volume: Decimal,
         order_type: OrderType,
         time_in_force: TimeInForce,
+        cloid: Option<String>,
     ) -> Result<OrderPlacement, String> {
         let asset_idx = self.get_asset_index(&symbol).await?;
         let is_buy = matches!(side, OrderSide::Buy);
@@ -668,16 +679,21 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             OrderType::Market => serde_json::json!({"limit": {"tif": "Ioc"}}),
         };
 
+        let mut order_json = serde_json::json!({
+            "a": asset_idx,
+            "b": is_buy,
+            "p": price.to_string(),
+            "s": volume.to_string(),
+            "r": false,
+            "t": order_type_val
+        });
+        if let Some(ref c) = cloid {
+            order_json["c"] = serde_json::json!(c);
+        }
+
         let action = serde_json::json!({
             "type": "order",
-            "orders": [{
-                "a": asset_idx,
-                "b": is_buy,
-                "p": price.to_string(),
-                "s": volume.to_string(),
-                "r": false,
-                "t": order_type_val
-            }],
+            "orders": [order_json],
             "grouping": "na"
         });
 
@@ -699,6 +715,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             price,
             quantity: volume,
             timestamp_ms,
+            cloid,
         })
     }
 
@@ -1129,6 +1146,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                         quantity,
                         fee_usd,
                         timestamp_ms: fill.time,
+                        cloid: fill.cloid,
                     })
                 })
                 .collect();
@@ -1187,6 +1205,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                         quantity: parse_decimal(&upd.order.orig_sz),
                         remaining_quantity: parse_decimal(&upd.order.sz),
                         timestamp_ms: upd.status_timestamp,
+                        cloid: upd.order.cloid,
                     }
                 })
                 .collect();

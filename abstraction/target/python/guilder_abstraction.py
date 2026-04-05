@@ -122,17 +122,18 @@ class OpenOrder:
 
 class OrderPlacement:
 	"""order placement response"""
-	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int):
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int, cloid: Option<String>):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.side = side
 		self.price = price
 		self.quantity = quantity
 		self.timestamp_ms = timestamp_ms
+		self.cloid = cloid
 
 class UserFill:
 	"""execution of the user's own order"""
-	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, fee_usd: str, timestamp_ms: int):
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, fee_usd: str, timestamp_ms: int, cloid: Option<String>):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.side = side
@@ -140,10 +141,11 @@ class UserFill:
 		self.quantity = quantity
 		self.fee_usd = fee_usd
 		self.timestamp_ms = timestamp_ms
+		self.cloid = cloid
 
 class OrderUpdate:
 	"""order lifecycle update"""
-	def __init__(self, order_id: int, symbol: str, status: OrderStatus, side: Option<OrderSide>, price: Option<Decimal>, quantity: Option<Decimal>, remaining_quantity: Option<Decimal>, timestamp_ms: int):
+	def __init__(self, order_id: int, symbol: str, status: OrderStatus, side: Option<OrderSide>, price: Option<Decimal>, quantity: Option<Decimal>, remaining_quantity: Option<Decimal>, timestamp_ms: int, cloid: Option<String>):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.status = status
@@ -152,6 +154,7 @@ class OrderUpdate:
 		self.quantity = quantity
 		self.remaining_quantity = remaining_quantity
 		self.timestamp_ms = timestamp_ms
+		self.cloid = cloid
 
 class FundingPayment:
 	"""funding payment applied to a position"""
@@ -228,8 +231,8 @@ class GetMarketData(ABC):
 class ManageOrder(ABC):
 	"""place, change, cancel order"""
 	@abstractmethod
-	async def place_order(self, symbol: str, side: OrderSide, price: str, volume: str, order_type: OrderType, time_in_force: TimeInForce) -> Result<OrderPlacement, String>:
-		"""place order"""
+	async def place_order(self, symbol: str, side: OrderSide, price: str, volume: str, order_type: OrderType, time_in_force: TimeInForce, cloid: Option<String>) -> Result<OrderPlacement, String>:
+		"""place order with optional client order ID for end-to-end tracking"""
 		pass
 
 	@abstractmethod

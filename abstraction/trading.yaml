@@ -60,7 +60,7 @@ traits:
     async: true
     methods:
       - name: place_order
-        description: place order
+        description: place order with optional client order ID for end-to-end tracking
         args:
           - name: symbol
             type: String
@@ -74,6 +74,8 @@ traits:
             type: OrderType
           - name: time_in_force
             type: TimeInForce
+          - name: cloid
+            type: Option<String>
         return_type: Result<OrderPlacement, String>
 
       - name: change_order_by_cloid
@@ -380,6 +382,8 @@ structs:
         type: Decimal
       - name: timestamp_ms
         type: i64
+      - name: cloid
+        type: Option<String>
 
   - name: UserFill
     description: execution of the user's own order
@@ -398,6 +402,8 @@ structs:
         type: Decimal
       - name: timestamp_ms
         type: i64
+      - name: cloid
+        type: Option<String>
 
   - name: OrderUpdate
     description: order lifecycle update
@@ -418,6 +424,8 @@ structs:
         type: Option<Decimal>
       - name: timestamp_ms
         type: i64
+      - name: cloid
+        type: Option<String>
 
   - name: FundingPayment
     description: funding payment applied to a position

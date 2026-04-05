@@ -80,6 +80,7 @@ impl guilder_abstraction::ManageOrder for BinanceClient {
         volume: Decimal,
         order_type: OrderType,
         time_in_force: TimeInForce,
+        cloid: Option<String>,
     ) -> Result<OrderPlacement, String> {
         unimplemented!()
     }
