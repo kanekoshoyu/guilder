@@ -79,6 +79,22 @@ impl Orderbook {
         }
     }
 
+    /// Returns the top `depth` levels per side as `(Side, price, volume)`,
+    /// ordered best-to-worst (lowest ask first, highest bid first).
+    /// If `depth` is `None`, returns all levels.
+    pub fn snapshot(&self, depth: Option<usize>) -> Vec<(Side, f64, f64)> {
+        let ask_iter = self.asks.iter().map(|(p, v)| (Side::Ask, p.into_inner(), *v));
+        let bid_iter = self
+            .bids
+            .iter()
+            .rev()
+            .map(|(p, v)| (Side::Bid, p.into_inner(), *v));
+        match depth {
+            Some(n) => ask_iter.take(n).chain(bid_iter.take(n)).collect(),
+            None => ask_iter.chain(bid_iter).collect(),
+        }
+    }
+
     /// Liquidity imbalance ratio: `(B - A) / (B + A)`.
     ///
     /// `top_n` limits to the top N levels per side. `None` uses the full book.

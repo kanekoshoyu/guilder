@@ -8,4 +8,4 @@ pub mod engine;
 pub use data::{CurrencyPair, IndexOrderbook, Orderbook};
 
 #[cfg(feature = "engine")]
-pub use engine::OrderbookEngine;
+pub use engine::{BookUpdate, EngineError, OrderbookEngine};
