@@ -6,7 +6,7 @@ use crate::Orderbook;
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio::time::Instant;
 
 use convert::apply_update;
@@ -30,12 +30,17 @@ pub struct OrderbookEngine<C> {
     add_tx: mpsc::UnboundedSender<Vec<String>>,
     add_rx: Mutex<Option<mpsc::UnboundedReceiver<Vec<String>>>>,
     update_tx: broadcast::Sender<BookUpdate>,
+    /// Shared semaphore limiting concurrent REST calls across all sync loops.
+    rest_semaphore: Arc<Semaphore>,
 }
 
 impl<C> OrderbookEngine<C>
 where
     C: GetMarketData + SubscribeMarketData + Send + Sync + 'static,
 {
+    /// Maximum number of concurrent REST snapshot requests to avoid rate-limiting.
+    const SNAPSHOT_CONCURRENCY: usize = 10;
+
     pub fn new(client: C) -> Self {
         let (add_tx, add_rx) = mpsc::unbounded_channel();
         let (update_tx, _) = broadcast::channel(4096);
@@ -46,6 +51,7 @@ where
             add_tx,
             add_rx: Mutex::new(Some(add_rx)),
             update_tx,
+            rest_semaphore: Arc::new(Semaphore::new(Self::SNAPSHOT_CONCURRENCY)),
         }
     }
 
@@ -75,6 +81,7 @@ where
                     Arc::clone(&self.books),
                     Arc::clone(&self.last_updated),
                     self.update_tx.clone(),
+                    Arc::clone(&self.rest_semaphore),
                     symbol,
                 ))
             })
@@ -103,6 +110,7 @@ where
                                     Arc::clone(&self.books),
                                     Arc::clone(&self.last_updated),
                                     self.update_tx.clone(),
+                                    Arc::clone(&self.rest_semaphore),
                                     symbol,
                                 )));
                             }
@@ -135,6 +143,7 @@ where
                                         Arc::clone(&self.books),
                                         Arc::clone(&self.last_updated),
                                         self.update_tx.clone(),
+                                        Arc::clone(&self.rest_semaphore),
                                         symbol,
                                     )));
                                 }
@@ -160,21 +169,23 @@ where
         })
     }
 
-    /// Snapshot and insert initial orderbooks for a batch of symbols (parallel).
+    /// Snapshot and insert initial orderbooks for a batch of symbols.
+    /// Limits concurrency to [`Self::SNAPSHOT_CONCURRENCY`] to stay within REST budgets.
     async fn snapshot_symbols(&self, symbols: &[String]) -> Result<(), EngineError> {
-        let futs: Vec<_> = symbols
-            .iter()
+        use futures::stream::{self, StreamExt};
+
+        let results: Vec<_> = stream::iter(symbols.iter().cloned())
             .map(|sym| {
                 let client = Arc::clone(&self.client);
-                let sym = sym.clone();
                 async move {
                     let snapshot = client.get_l2_orderbook(sym.clone()).await?;
                     Ok::<_, String>((sym, snapshot))
                 }
             })
-            .collect();
+            .buffer_unordered(Self::SNAPSHOT_CONCURRENCY)
+            .collect()
+            .await;
 
-        let results = futures::future::join_all(futs).await;
         for result in results {
             let (sym, snapshot) = result?;
             let mut book = Orderbook::new();
