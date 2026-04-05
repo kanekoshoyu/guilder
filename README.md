@@ -10,80 +10,120 @@ Unopinionated multi-language cross-exchange crypto trading library in Rust.
 
 Every crypto exchange has a different API, but they all do the same things: get prices, place orders, stream market data. Guilder defines those operations as a shared set of traits in a YAML file, auto-generates the trait code, and lets exchange clients implement them. Strategies written against the traits work on any exchange with no changes.
 
+## Crates
+
+| Crate | Description | crates.io |
+|---|---|---|
+| [`guilder-abstraction`](abstraction/target/rust/README.md) | Auto-generated trading traits, structs, and enums | [![crates](https://img.shields.io/crates/v/guilder-abstraction)](https://crates.io/crates/guilder-abstraction) |
+| [`guilder-core`](core/README.md) | Reusable trading components — orderbook, currency pair, live engine | [![crates](https://img.shields.io/crates/v/guilder-core)](https://crates.io/crates/guilder-core) |
+| [`guilder-client-hyperliquid`](client/guilder-client-hyperliquid/README.md) | Hyperliquid exchange client | [![crates](https://img.shields.io/crates/v/guilder-client-hyperliquid)](https://crates.io/crates/guilder-client-hyperliquid) |
+| [`guilder-client-binance`](client/guilder-client-binance/) | Binance exchange client | not yet published |
+
+## Architecture
+
+```
+trading.yaml → guilder-abstraction → guilder-core → your strategy
+                                   ↗
+              guilder-client-* ────
+```
+
+See [DESIGN.md](DESIGN.md) for detailed design documentation.
+
 ## Repository layout
 
 ```
 abstraction/
-  trading.yaml          # source of truth — traits, structs, enums defined in a language-neutral DSL
+  trading.yaml          # source of truth — traits, structs, enums in a language-neutral DSL
   codegen/              # Rust binary that reads trading.yaml and writes generated code
   target/
-    rust/               # generated Rust trait definitions (published to crates.io as guilder-abstraction)
+    rust/               # generated Rust traits (published as guilder-abstraction)
     python/             # generated Python abstract base classes
 
-core/                   # reusable trading components (Orderbook, CurrencyPair) built on the traits
+core/                   # reusable trading components built on the traits
+  src/
+    data/               # Orderbook, CurrencyPair, IndexOrderbook
+    engine/             # live orderbook sync engine (feature-gated)
 
 client/
-  guilder-client-template/   # generated starting point for a new exchange client (not a real crate)
-  guilder-client-binance/    # Binance implementation
+  guilder-client-template/    # generated starting point for a new exchange client
+  guilder-client-binance/     # Binance implementation
   guilder-client-hyperliquid/ # Hyperliquid implementation
 ```
+
+## Quick start
+
+```toml
+[dependencies]
+guilder-abstraction = "0.1"
+guilder-core = { version = "0.2", features = ["engine"] }
+guilder-client-hyperliquid = "0.4"
+```
+
+```rust
+use guilder_client_hyperliquid::HyperliquidClient;
+use guilder_core::OrderbookEngine;
+use guilder_abstraction::Side;
+
+let client = HyperliquidClient::new(/* config */);
+
+// live orderbook sync across all symbols
+let engine = OrderbookEngine::new(client);
+engine.track_all().await?;
+
+// query analytics on the live book
+let liquidity = engine.liquidity("BTC", Side::Bid, 0.01);
+let imbalance = engine.imbalance("BTC", Some(10));
+```
+
+## Traits
+
+| Trait | Description |
+|---|---|
+| `TestServer` | Ping and server time |
+| `GetMarketData` | Symbols, prices, orderbook snapshots, open interest, funding rates |
+| `GetAccountSnapshot` | Account state — collateral, positions, open orders |
+| `ManageOrder` | Place, modify, cancel orders |
+| `SubscribeMarketData` | Stream L2 updates, fills, asset context, liquidations |
+| `SubscribeUserEvents` | Stream user fills, order updates, funding, deposits, withdrawals |
+
+## Implementation status
+
+| Trait | Hyperliquid | Binance |
+|---|---|---|
+| `TestServer` | Complete | Not started |
+| `GetMarketData` | Complete | Not started |
+| `GetAccountSnapshot` | Complete | Not started |
+| `ManageOrder` | Complete | Not started |
+| `SubscribeMarketData` | Complete | Not started |
+| `SubscribeUserEvents` | Complete | Not started |
 
 ## How codegen works
 
 1. Edit `abstraction/trading.yaml` to add or change traits, structs, or enums.
 2. Run the codegen:
-   ```
+   ```sh
    cd abstraction/codegen && cargo run
    ```
 3. Codegen writes:
    - `abstraction/target/rust/src/guilder_abstraction.rs` — Rust trait and type definitions
    - `abstraction/target/python/guilder_abstraction.py` — Python abstract base classes
-   - `client/guilder-client-template/` — a fresh client template (see below)
+   - `client/guilder-client-template/` — fresh client scaffold
 
-Never edit the generated files directly — they will be overwritten on the next codegen run.
+Never edit generated files directly — they are overwritten on each codegen run.
 
 ## Adding a new exchange client
 
 1. Run the codegen to get an up-to-date template.
 2. Copy `client/guilder-client-template/` to `client/guilder-client-<exchange>/`.
-3. In the new directory:
-   - Rename the package in `Cargo.toml`.
-   - Replace `ExchangeClient` with your struct name (e.g. `BinanceClient`).
-   - Implement each method — they all start as `unimplemented!()`.
-4. Add your crate to the workspace if needed.
-
-## Traits
-
-| Trait | Description | Async |
-|---|---|---|
-| `TestServer` | Ping and server time | yes |
-| `GetMarketData` | Symbols, prices, orderbook snapshots | yes |
-| `GetAccountSnapshot` | Account state snapshot (collateral, positions, orders) | yes |
-| `ManageOrder` | Place, modify, cancel orders | yes |
-| `SubscribeMarketData` | Streaming L2 updates, fills, asset context, liquidations via `BoxStream` | yes |
-| `SubscribeUserEvents` | Streaming user fills, order updates, funding, deposits, withdrawals via `BoxStream` | yes |
-
-## Implementation status
-
-| Trait | binance | hyperliquid |
-|---|---|---|
-| `TestServer` | ❌ | ✅ |
-| `GetMarketData` | ❌ | ✅ |
-| `GetAccountSnapshot` | ❌ | ✅ |
-| `ManageOrder` | ❌ | ✅ |
-| `SubscribeMarketData` | ❌ | ✅ |
-| `SubscribeUserEvents` | ❌ | ✅ |
-
-legend: ✅ complete, 🚧 partial, ❌ not started
-
+3. Rename the package in `Cargo.toml` and the struct (e.g. `BinanceClient`).
+4. Implement each method — they all start as `unimplemented!()`.
 
 ## Design constraints
 
-- `trading.yaml` uses only primitives and types defined within the YAML itself — no external crate types.
-- Generated abstraction code uses only the standard library.
-- All traits are async.
-- `Stream` return types (for subscriptions) stay as `fn` returning `impl Stream`, not `async fn`.
-- **Reconnection is a client responsibility.** WebSocket streams returned by `subscribe_*` methods auto-reconnect on connection loss (5 s delay). Consumers see transient `Err` items but the stream never terminates due to a dropped connection — they can treat the stream as logically persistent. This keeps reconnection logic out of higher-level engines and strategies.
+- `trading.yaml` uses only primitives and types defined within the YAML — no external crate types.
+- Generated code depends only on the standard library (plus `futures-core` for `Stream`).
+- All traits are async. Subscription methods return `BoxStream` for object safety.
+- Reconnection is a client responsibility — WebSocket streams auto-reconnect so consumers see a logically persistent stream.
 
 ## Why "Guilder"?
 
