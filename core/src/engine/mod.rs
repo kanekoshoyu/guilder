@@ -5,7 +5,7 @@ mod sync;
 use crate::Orderbook;
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 
@@ -28,7 +28,7 @@ pub struct OrderbookEngine<C> {
     books: Arc<DashMap<String, Orderbook>>,
     last_updated: Arc<DashMap<String, Instant>>,
     add_tx: mpsc::UnboundedSender<Vec<String>>,
-    add_rx: Option<mpsc::UnboundedReceiver<Vec<String>>>,
+    add_rx: Mutex<Option<mpsc::UnboundedReceiver<Vec<String>>>>,
     update_tx: broadcast::Sender<BookUpdate>,
 }
 
@@ -44,7 +44,7 @@ where
             books: Arc::new(DashMap::new()),
             last_updated: Arc::new(DashMap::new()),
             add_tx,
-            add_rx: Some(add_rx),
+            add_rx: Mutex::new(Some(add_rx)),
             update_tx,
         }
     }
@@ -58,13 +58,13 @@ where
     /// Subscribe to all symbols returned by `get_symbol()` and block, syncing
     /// orderbooks until all streams end. Caller should `tokio::task::spawn_local`
     /// or run this on a `LocalSet` since trait async fns may not be `Send`.
-    pub async fn track_all(&mut self) -> Result<(), EngineError> {
+    pub async fn track_all(&self) -> Result<(), EngineError> {
         let symbols = self.client.get_symbol().await?;
         self.track(symbols).await
     }
 
     /// Subscribe to a specific set of symbols and block, syncing orderbooks.
-    pub async fn track(&mut self, symbols: Vec<String>) -> Result<(), EngineError> {
+    pub async fn track(&self, symbols: Vec<String>) -> Result<(), EngineError> {
         self.snapshot_symbols(&symbols).await?;
 
         let mut futures: Vec<_> = symbols
@@ -81,7 +81,7 @@ where
             .collect();
 
         // take the receiver — only one track() call drives the add-loop
-        let mut add_rx = self.add_rx.take();
+        let mut add_rx = self.add_rx.lock().unwrap_or_else(|e| e.into_inner()).take();
 
         loop {
             if futures.is_empty() && add_rx.is_none() {
