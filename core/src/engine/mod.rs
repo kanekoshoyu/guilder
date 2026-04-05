@@ -32,6 +32,10 @@ pub struct OrderbookEngine<C> {
     update_tx: broadcast::Sender<BookUpdate>,
     /// Shared semaphore limiting concurrent REST calls across all sync loops.
     rest_semaphore: Arc<Semaphore>,
+    /// When `true`, skip the initial REST snapshot and let the first WS message
+    /// seed the orderbook. Useful for exchanges (e.g. Hyperliquid) whose WS
+    /// streams deliver full snapshots on every tick.
+    skip_initial_snapshot: bool,
 }
 
 impl<C> OrderbookEngine<C>
@@ -52,7 +56,16 @@ where
             add_rx: Mutex::new(Some(add_rx)),
             update_tx,
             rest_semaphore: Arc::new(Semaphore::new(Self::SNAPSHOT_CONCURRENCY)),
+            skip_initial_snapshot: false,
         }
+    }
+
+    /// Skip the initial REST snapshot on `track()`/`track_all()`. The first WS
+    /// message will seed each orderbook instead. Use this for exchanges that
+    /// deliver full snapshots over WebSocket (e.g. Hyperliquid).
+    pub fn with_skip_initial_snapshot(mut self, skip: bool) -> Self {
+        self.skip_initial_snapshot = skip;
+        self
     }
 
     /// Subscribe to a broadcast channel of orderbook updates.
@@ -71,7 +84,9 @@ where
 
     /// Subscribe to a specific set of symbols and block, syncing orderbooks.
     pub async fn track(&self, symbols: Vec<String>) -> Result<(), EngineError> {
-        self.snapshot_symbols(&symbols).await?;
+        if !self.skip_initial_snapshot {
+            self.snapshot_symbols(&symbols).await?;
+        }
 
         let mut futures: Vec<_> = symbols
             .into_iter()
@@ -100,9 +115,11 @@ where
                 if let Some(rx) = &mut add_rx {
                     match rx.recv().await {
                         Some(new_symbols) => {
-                            if let Err(e) = self.snapshot_symbols(&new_symbols).await {
-                                eprintln!("track_additional snapshot error: {e}");
-                                continue;
+                            if !self.skip_initial_snapshot {
+                                if let Err(e) = self.snapshot_symbols(&new_symbols).await {
+                                    eprintln!("track_additional snapshot error: {e}");
+                                    continue;
+                                }
                             }
                             for symbol in new_symbols {
                                 futures.push(Box::pin(sync_loop(
@@ -133,9 +150,11 @@ where
                     msg = rx.recv() => {
                         match msg {
                             Some(new_symbols) => {
-                                if let Err(e) = self.snapshot_symbols(&new_symbols).await {
-                                    eprintln!("track_additional snapshot error: {e}");
-                                    continue;
+                                if !self.skip_initial_snapshot {
+                                    if let Err(e) = self.snapshot_symbols(&new_symbols).await {
+                                        eprintln!("track_additional snapshot error: {e}");
+                                        continue;
+                                    }
                                 }
                                 for symbol in new_symbols {
                                     futures.push(Box::pin(sync_loop(

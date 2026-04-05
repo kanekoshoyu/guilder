@@ -68,9 +68,8 @@ pub(crate) async fn sync_loop<C>(
                 // broadcast update before applying
                 let _ = update_tx.send(to_book_update(&update));
 
-                if let Some(mut book) = books.get_mut(&symbol) {
-                    apply_update(book.value_mut(), &update);
-                }
+                let mut book = books.entry(symbol.clone()).or_insert_with(Orderbook::new);
+                apply_update(book.value_mut(), &update);
                 last_updated.insert(symbol.clone(), Instant::now());
             }
             Err(_) => {
