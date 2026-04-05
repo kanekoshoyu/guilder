@@ -40,6 +40,7 @@ pub(crate) async fn sync_loop<C>(
     update_tx: broadcast::Sender<BookUpdate>,
     rest_semaphore: Arc<Semaphore>,
     symbol: String,
+    ws_is_source_of_truth: bool,
 ) where
     C: GetMarketData + SubscribeMarketData + Send + Sync + 'static,
 {
@@ -49,18 +50,23 @@ pub(crate) async fn sync_loop<C>(
     while let Some(result) = stream.next().await {
         match result {
             Ok(update) => {
-                // sequence gap detection
-                if let Some(prev) = last_seq {
-                    if update.sequence > prev + 1 {
-                        last_seq = resnapshot(
-                            client.as_ref(),
-                            &books,
-                            &last_updated,
-                            &rest_semaphore,
-                            &symbol,
-                        )
-                        .await;
-                        continue;
+                // Sequence gap detection — only when REST snapshots are the
+                // source of truth.  For exchanges whose WS delivers full
+                // snapshots (e.g. Hyperliquid) the "sequence" is a timestamp,
+                // not a monotonic counter, so gap detection is meaningless.
+                if !ws_is_source_of_truth {
+                    if let Some(prev) = last_seq {
+                        if update.sequence > prev + 1 {
+                            last_seq = resnapshot(
+                                client.as_ref(),
+                                &books,
+                                &last_updated,
+                                &rest_semaphore,
+                                &symbol,
+                            )
+                            .await;
+                            continue;
+                        }
                     }
                 }
                 last_seq = Some(update.sequence);
@@ -73,16 +79,21 @@ pub(crate) async fn sync_loop<C>(
                 last_updated.insert(symbol.clone(), Instant::now());
             }
             Err(_) => {
-                // stream error — re-snapshot and resubscribe
-                last_seq = resnapshot(
-                    client.as_ref(),
-                    &books,
-                    &last_updated,
-                    &rest_semaphore,
-                    &symbol,
-                )
-                .await;
-                stream = client.subscribe_l2_update(symbol.clone());
+                if ws_is_source_of_truth {
+                    // Just resubscribe — next WS message is a full snapshot.
+                    stream = client.subscribe_l2_update(symbol.clone());
+                } else {
+                    // REST re-snapshot before resubscribing.
+                    last_seq = resnapshot(
+                        client.as_ref(),
+                        &books,
+                        &last_updated,
+                        &rest_semaphore,
+                        &symbol,
+                    )
+                    .await;
+                    stream = client.subscribe_l2_update(symbol.clone());
+                }
             }
         }
     }

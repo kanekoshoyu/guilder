@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4 — 2026-04-05
+
+- Disable sequence gap detection and REST re-snapshot in `sync_loop` when `skip_initial_snapshot` is enabled
+  - Hyperliquid's WS `time` field is a millisecond timestamp, not a monotonic counter — gap detection was triggering on every message, causing continuous REST calls
+  - On stream error, simply resubscribe (next WS message is a full snapshot)
+
 ## 0.3.3 — 2026-04-05
 
 - Add `with_skip_initial_snapshot(bool)` builder method to `OrderbookEngine`

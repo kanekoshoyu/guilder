@@ -98,6 +98,7 @@ where
                     self.update_tx.clone(),
                     Arc::clone(&self.rest_semaphore),
                     symbol,
+                    self.skip_initial_snapshot,
                 ))
             })
             .collect();
@@ -129,6 +130,7 @@ where
                                     self.update_tx.clone(),
                                     Arc::clone(&self.rest_semaphore),
                                     symbol,
+                                    self.skip_initial_snapshot,
                                 )));
                             }
                         }
@@ -164,6 +166,7 @@ where
                                         self.update_tx.clone(),
                                         Arc::clone(&self.rest_semaphore),
                                         symbol,
+                                        self.skip_initial_snapshot,
                                     )));
                                 }
                             }
