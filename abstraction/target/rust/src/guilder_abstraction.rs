@@ -235,6 +235,15 @@ pub struct Withdrawal {
 	pub timestamp_ms: i64,
 }
 
+/// account balance for an asset
+#[derive(Debug, Clone)]
+pub struct Balance {
+	pub coin: String,
+	pub total: Decimal,
+	pub available: Decimal,
+	pub locked: Decimal,
+}
+
 /// test server network connection
 #[allow(async_fn_in_trait)]
 pub trait TestServer {
@@ -298,6 +307,10 @@ pub trait GetAccountSnapshot {
 	async fn get_open_orders(&self) -> Result<Vec<OpenOrder>, String>;
 	/// get available account collateral
 	async fn get_collateral(&self) -> Result<Decimal, String>;
+	/// get all spot wallet balances
+	async fn get_spot_balance(&self) -> Result<Vec<Balance>, String>;
+	/// get clearing house collateral balance (typically USDC only)
+	async fn get_collateral_balance(&self, asset: String) -> Result<Balance, String>;
 }
 
 /// subscribe to authenticated user account events
@@ -313,5 +326,9 @@ pub trait SubscribeUserEvents {
 	fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>>;
 	/// stream account withdrawal events
 	fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>>;
+	/// subscribe to spot wallet balance updates for the registered user address (requires authentication)
+	fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<Balance>, String>>;
+	/// subscribe to spot wallet balance updates for a specific address
+	fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<Balance>, String>>;
 }
 

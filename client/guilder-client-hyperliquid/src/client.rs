@@ -274,6 +274,19 @@ struct WsUserEvent {
     liquidation: Option<WsLiquidation>,
     fills: Option<Vec<WsUserFill>>,
     funding: Option<WsFunding>,
+    spot_state: Option<WsSpotState>,
+}
+
+#[derive(Deserialize)]
+struct WsSpotState {
+    balances: Option<Vec<WsSpotBalance>>,
+}
+
+#[derive(Deserialize)]
+struct WsSpotBalance {
+    coin: String,
+    total: String,
+    hold: String,
 }
 
 #[derive(Deserialize)]
@@ -1097,6 +1110,71 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
         parse_decimal(&state.margin_summary.account_value)
             .ok_or_else(|| "invalid account value".to_string())
     }
+
+    /// Returns all spot wallet balances from `spotState`. Requires `with_auth`.
+    async fn get_spot_balance(&self) -> Result<Vec<guilder_abstraction::Balance>, String> {
+        let user = self.require_user_address()?;
+        // spotClearinghouseState → weight 15
+        let resp = self
+            .info_post(
+                serde_json::json!({"type": "spotClearinghouseState", "user": user}),
+                15,
+                "get_spot_balance",
+            )
+            .await?;
+
+        #[derive(Deserialize)]
+        struct SpotStateResponse {
+            balances: Vec<SpotBalance>,
+        }
+
+        #[derive(Deserialize)]
+        struct SpotBalance {
+            coin: String,
+            total: String,
+            hold: String,
+            #[serde(default)]
+            token: Option<i32>,
+            #[serde(default)]
+            entryNtl: Option<String>,
+        }
+
+        let state: SpotStateResponse = parse_response(resp).await?;
+
+        state.balances
+            .into_iter()
+            .map(|balance| {
+                let total = parse_decimal(&balance.total)
+                    .ok_or_else(|| "invalid total balance".to_string())?;
+                let locked = parse_decimal(&balance.hold)
+                    .ok_or_else(|| "invalid hold balance".to_string())?;
+                let available = total - locked;
+
+                Ok(guilder_abstraction::Balance {
+                    coin: balance.coin,
+                    total,
+                    available,
+                    locked,
+                })
+            })
+            .collect()
+    }
+
+    /// Returns clearing house collateral balance for an asset. Currently returns the total collateral.
+    /// Requires `with_auth`.
+    async fn get_collateral_balance(&self, asset: String) -> Result<guilder_abstraction::Balance, String> {
+        if asset.to_uppercase() != "USDC" {
+            return Err(format!("only USDC collateral is supported, got {}", asset));
+        }
+
+        let total = self.get_collateral().await?;
+        Ok(guilder_abstraction::Balance {
+            coin: "USDC".to_string(),
+            total,
+            available: total,
+            locked: Decimal::ZERO,
+        })
+    }
 }
 
 #[allow(async_fn_in_trait)]
@@ -1348,5 +1426,65 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 Some(stream::iter(items.into_iter().map(Ok)))
             }
         }).flatten())
+    }
+
+    /// Subscribe to spot wallet balance updates for the registered user address.
+    /// Requires authentication (address must be set). Returns error if address not registered.
+    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
+        let Some(addr) = self.user_address else {
+            return Box::pin(stream::iter(vec![Err("user address not registered".to_string())]));
+        };
+        let addr_str = format!("{:#x}", addr);
+        self.subscribe_spot_balance_with_address(addr_str)
+    }
+
+    /// Subscribe to spot wallet balance updates for a specific address.
+    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
+        let addr_str = address;
+        let sub = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {"type": "userEvents", "user": addr_str.clone()}
+        });
+        let key = crate::ws::SubKey {
+            channel: "userEvents".to_string(),
+            routing_key: addr_str,
+        };
+        let raw_stream = self.ws_mux.subscribe(key, sub);
+        Box::pin(raw_stream.filter_map(|text| async move {
+            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                return None;
+            };
+            if env.channel != "userEvents" {
+                return None;
+            }
+            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
+                return None;
+            };
+
+            // Extract spot balances from the event
+            let spot_state = event.spot_state?;
+            let balances = spot_state.balances?;
+
+            let items: Vec<_> = balances
+                .into_iter()
+                .filter_map(|b| {
+                    let total = parse_decimal(&b.total)?;
+                    let locked = parse_decimal(&b.hold)?;
+                    let available = total - locked;
+                    Some(guilder_abstraction::Balance {
+                        coin: b.coin,
+                        total,
+                        available,
+                        locked,
+                    })
+                })
+                .collect();
+
+            if items.is_empty() {
+                None
+            } else {
+                Some(Ok(items))
+            }
+        }))
     }
 }

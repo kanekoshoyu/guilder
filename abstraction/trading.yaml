@@ -148,6 +148,17 @@ traits:
         description: get available account collateral
         return_type: Result<Decimal, String>
 
+      - name: get_spot_balance
+        description: get all spot wallet balances
+        return_type: Result<Vec<Balance>, String>
+
+      - name: get_collateral_balance
+        description: get clearing house collateral balance (typically USDC only)
+        return_type: Result<Balance, String>
+        args:
+          - name: asset
+            type: String
+
   - name: SubscribeUserEvents
     description: subscribe to authenticated user account events
     async: true
@@ -171,6 +182,17 @@ traits:
       - name: subscribe_withdrawals
         description: stream account withdrawal events
         return_type: Stream<Result<Withdrawal, String>>
+
+      - name: subscribe_spot_balance
+        description: subscribe to spot wallet balance updates for the registered user address (requires authentication)
+        return_type: Stream<Result<Vec<Balance>, String>>
+
+      - name: subscribe_spot_balance_with_address
+        description: subscribe to spot wallet balance updates for a specific address
+        return_type: Stream<Result<Vec<Balance>, String>>
+        args:
+          - name: address
+            type: String
 
 
 enums:
@@ -456,3 +478,15 @@ structs:
         type: Decimal
       - name: timestamp_ms
         type: i64
+
+  - name: Balance
+    description: account balance for an asset
+    values:
+      - name: coin
+        type: String
+      - name: total
+        type: Decimal
+      - name: available
+        type: Decimal
+      - name: locked
+        type: Decimal

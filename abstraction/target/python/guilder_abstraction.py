@@ -177,6 +177,14 @@ class Withdrawal:
 		self.amount_usd = amount_usd
 		self.timestamp_ms = timestamp_ms
 
+class Balance:
+	"""account balance for an asset"""
+	def __init__(self, coin: str, total: str, available: str, locked: str):
+		self.coin = coin
+		self.total = total
+		self.available = available
+		self.locked = locked
+
 class TestServer(ABC):
 	"""test server network connection"""
 	@abstractmethod
@@ -291,6 +299,16 @@ class GetAccountSnapshot(ABC):
 		"""get available account collateral"""
 		pass
 
+	@abstractmethod
+	async def get_spot_balance(self) -> Result<Vec<Balance>, String>:
+		"""get all spot wallet balances"""
+		pass
+
+	@abstractmethod
+	async def get_collateral_balance(self, asset: str) -> Result<Balance, String>:
+		"""get clearing house collateral balance (typically USDC only)"""
+		pass
+
 
 class SubscribeUserEvents(ABC):
 	"""subscribe to authenticated user account events"""
@@ -317,6 +335,16 @@ class SubscribeUserEvents(ABC):
 	@abstractmethod
 	async def subscribe_withdrawals(self) -> AsyncIterator[Result<Withdrawal, String>]:
 		"""stream account withdrawal events"""
+		pass
+
+	@abstractmethod
+	async def subscribe_spot_balance(self) -> AsyncIterator[Result<Vec<Balance>, String>]:
+		"""subscribe to spot wallet balance updates for the registered user address (requires authentication)"""
+		pass
+
+	@abstractmethod
+	async def subscribe_spot_balance_with_address(self, address: str) -> AsyncIterator[Result<Vec<Balance>, String>]:
+		"""subscribe to spot wallet balance updates for a specific address"""
 		pass
 
 

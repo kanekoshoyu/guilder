@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -115,6 +115,14 @@ impl guilder_abstraction::GetAccountSnapshot for ExchangeClient {
         Err("not implemented".to_string())
     }
 
+    async fn get_spot_balance(&self) -> Result<Vec<Balance>, String> {
+        Err("not implemented".to_string())
+    }
+
+    async fn get_collateral_balance(&self, asset: String) -> Result<Balance, String> {
+        Err("not implemented".to_string())
+    }
+
 }
 
 #[allow(unused_variables)]
@@ -137,6 +145,14 @@ impl guilder_abstraction::SubscribeUserEvents for ExchangeClient {
     }
 
     fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
+        Box::pin(stream::empty())
+    }
+
+    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<Balance>, String>> {
+        Box::pin(stream::empty())
+    }
+
+    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<Balance>, String>> {
         Box::pin(stream::empty())
     }
 
