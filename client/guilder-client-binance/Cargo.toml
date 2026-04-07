@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = { path = "../../abstraction/target/rust" }
+guilder-abstraction = "0.1.1"
 reqwest.workspace = true
 futures-core.workspace = true
 futures-util = "0.3"

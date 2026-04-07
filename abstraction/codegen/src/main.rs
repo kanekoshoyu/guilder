@@ -613,7 +613,7 @@ fn codegen_client_rust(struct_name: &str, config: &YamlConfig) -> String {
 
     // struct definition
     code.push_str(&format!(
-        "pub struct {} {{\n    client: Client,\n}}\n\n",
+        "#[allow(dead_code)]\npub struct {} {{\n    client: Client,\n}}\n\n",
         struct_name
     ));
 

@@ -1,12 +1,13 @@
 use futures_util::stream;
 use guilder_abstraction::{
-    self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation, OpenOrder,
-    OrderPlacement, OrderSide, OrderType, OrderUpdate, Position, PredictedFunding, TimeInForce,
-    UserFill, Withdrawal,
+    self, AssetContext, Balance, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation,
+    OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position, PredictedFunding,
+    TimeInForce, UserFill, Withdrawal,
 };
 use reqwest::Client;
 use rust_decimal::Decimal;
 
+#[allow(dead_code)]
 pub struct BinanceClient {
     client: Client,
 }
@@ -137,6 +138,14 @@ impl guilder_abstraction::GetAccountSnapshot for BinanceClient {
     async fn get_collateral(&self) -> Result<Decimal, String> {
         unimplemented!()
     }
+
+    async fn get_spot_balance(&self) -> Result<Vec<Balance>, String> {
+        unimplemented!()
+    }
+
+    async fn get_collateral_balance(&self, symbol: String) -> Result<Balance, String> {
+        unimplemented!()
+    }
 }
 
 #[allow(unused_variables)]
@@ -159,6 +168,14 @@ impl guilder_abstraction::SubscribeUserEvents for BinanceClient {
     }
 
     fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<Balance>, String>> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<Balance>, String>> {
         Box::pin(stream::pending())
     }
 }

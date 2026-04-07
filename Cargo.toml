@@ -11,6 +11,9 @@ exclude = [
     "client/.claude", # claude code config directory
 ]
 
+[patch.crates-io]
+guilder-abstraction = { path = "abstraction/target/rust" }
+
 [workspace.dependencies]
 # serde
 serde = { version = "1.0.209", features = ["derive"] }

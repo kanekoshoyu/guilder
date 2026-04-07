@@ -1128,6 +1128,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             balances: Vec<SpotBalance>,
         }
 
+        #[allow(dead_code)]
         #[derive(Deserialize)]
         struct SpotBalance {
             coin: String,
@@ -1136,7 +1137,8 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             #[serde(default)]
             token: Option<i32>,
             #[serde(default)]
-            entryNtl: Option<String>,
+            #[serde(rename = "entryNtl")]
+            entry_ntl: Option<String>,
         }
 
         let state: SpotStateResponse = parse_response(resp).await?;

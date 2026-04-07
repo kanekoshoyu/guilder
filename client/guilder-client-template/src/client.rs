@@ -2,6 +2,7 @@ use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Resul
 use futures_util::stream;
 use reqwest::Client;
 
+#[allow(dead_code)]
 pub struct ExchangeClient {
     client: Client,
 }

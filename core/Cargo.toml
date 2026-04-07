@@ -12,7 +12,7 @@ engine = ["dashmap", "tokio", "tokio-stream", "rust_decimal", "futures"]
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = { path = "../abstraction/target/rust", version = "0.1.1" }
+guilder-abstraction = "0.1.15"
 ordered-float.workspace = true
 # engine feature deps
 dashmap = { workspace = true, optional = true }
