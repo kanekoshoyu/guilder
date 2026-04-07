@@ -951,17 +951,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-abstraction"
-version = "0.1.13"
-dependencies = [
- "futures-core",
- "rust_decimal",
-]
-
-[[package]]
-name = "guilder-abstraction"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "983727fff0fc1c5550fc7548f1da193e9e8df67afbfddc77c429b510ac304554"
+version = "0.1.14"
 dependencies = [
  "futures-core",
  "rust_decimal",
@@ -981,20 +971,20 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
- "guilder-abstraction 0.1.13",
+ "guilder-abstraction",
  "reqwest",
  "rust_decimal",
 ]
 
 [[package]]
 name = "guilder-client-hyperliquid"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "alloy-primitives",
  "async-stream",
  "futures-core",
  "futures-util",
- "guilder-abstraction 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)",
+ "guilder-abstraction",
  "hex",
  "k256",
  "reqwest",
@@ -1010,11 +1000,11 @@ dependencies = [
 
 [[package]]
 name = "guilder-core"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "dashmap",
  "futures",
- "guilder-abstraction 0.1.13",
+ "guilder-abstraction",
  "ordered-float",
  "rust_decimal",
  "tokio",
