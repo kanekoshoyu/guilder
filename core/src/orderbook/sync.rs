@@ -1,13 +1,13 @@
-use crate::Orderbook;
+use std::sync::Arc;
+
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, SubscribeMarketData};
-use std::sync::Arc;
 use tokio::sync::{broadcast, Semaphore};
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 
 use super::convert::{apply_update, to_book_update};
-use super::BookUpdate;
+use super::types::{BookUpdate, Orderbook};
 
 /// Re-snapshot a single symbol, acquiring the shared semaphore first to
 /// prevent a thundering herd of REST calls when many streams gap at once.

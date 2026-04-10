@@ -1,7 +1,6 @@
-use crate::Orderbook;
 use guilder_abstraction::{L2Update, Side};
 
-use super::BookUpdate;
+use super::types::{BookUpdate, Orderbook};
 
 pub(crate) fn apply_update(book: &mut Orderbook, update: &L2Update) {
     let price = f64_from_decimal(update.price);

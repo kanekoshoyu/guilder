@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "core", # common trading components on top of guilder trait
+    "core", # common trading components (orderbook, currency pair, account)
     "abstraction/codegen", # codegen for guilder trait code
     "abstraction/target/rust", # guilder trait in rust
     "client/*", # implementation of guilder trait
@@ -28,4 +28,9 @@ ordered-float = "4.2.2"
 # async stream trait (no runtime, tokio-compatible)
 futures-core = "0.3"
 # async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# account feature deps
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+arc-swap = "1"

@@ -1,11 +1,16 @@
-/// data models: orderbook, currency pair
-pub mod data;
-
-/// orderbook engine: live sync + analytics
+/// orderbook data structures and live sync engine
 #[cfg(feature = "engine")]
-pub mod engine;
+pub mod orderbook;
 
-pub use data::{CurrencyPair, IndexOrderbook, Orderbook};
+/// account state machine — deterministic event-sourced account tracking
+#[cfg(feature = "account")]
+pub mod account;
 
 #[cfg(feature = "engine")]
-pub use engine::{BookUpdate, EngineError, OrderbookEngine};
+pub use orderbook::{BookUpdate, CurrencyPair, EngineError, IndexOrderbook, Orderbook, OrderbookEngine};
+
+#[cfg(feature = "account")]
+pub use account::{
+    AccountEngine, AccountError, AccountEvent, AccountState, ExchangeSnapshot, OpenOrder,
+    OrderStatus, Position, ReconciliationDiff, RecentFill, Side, SpotBalance,
+};

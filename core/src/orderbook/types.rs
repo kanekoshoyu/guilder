@@ -3,6 +3,15 @@ use guilder_abstraction::Side;
 use ordered_float::OrderedFloat;
 use std::collections::{BTreeMap, HashMap};
 
+/// Event emitted on each orderbook update.
+#[derive(Debug, Clone)]
+pub struct BookUpdate {
+    pub symbol: String,
+    pub side: Side,
+    pub price: f64,
+    pub volume: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct Orderbook {
     asks: BTreeMap<OrderedFloat<f64>, f64>,

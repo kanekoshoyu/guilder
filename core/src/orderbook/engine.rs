@@ -1,27 +1,13 @@
-mod convert;
-mod error;
-mod sync;
-
-use crate::Orderbook;
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio::time::Instant;
 
-use convert::apply_update;
-use sync::sync_loop;
-
-pub use error::EngineError;
-
-/// Event emitted on each orderbook update.
-#[derive(Debug, Clone)]
-pub struct BookUpdate {
-    pub symbol: String,
-    pub side: Side,
-    pub price: f64,
-    pub volume: f64,
-}
+use super::convert::apply_update;
+use super::error::EngineError;
+use super::sync::sync_loop;
+use super::types::{BookUpdate, Orderbook};
 
 pub struct OrderbookEngine<C> {
     client: Arc<C>,

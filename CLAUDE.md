@@ -8,7 +8,7 @@ Unopinionated multi-language cross-exchange crypto trading library in Rust.
 |---|---|---|
 | Abstraction | `abstraction/` | Trading traits defined in `trading.yaml`, auto-generated into Rust/Python |
 | Codegen | `abstraction/codegen/` | Reads `trading.yaml` and generates trait code |
-| Core | `core/` | Common trading components (`Orderbook`, `CurrencyPair`) built on abstraction |
+| Core | `core/` | Common trading components (`orderbook/`, `account/`, `currency_pair`) built on abstraction |
 | Clients | `client/` | Exchange implementations (Binance, Hyperliquid) |
 
 ## How It Works

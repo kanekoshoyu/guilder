@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-04-10
+
+- Restructure `core/src/` modules for consistent file layout:
+  - `data/` and `engine/` merged into `orderbook/` — matches `account/` naming convention
+  - `orderbook/` now uses the same `mod.rs` + `engine.rs` + `types.rs` + `error.rs` pattern as `account/`
+  - `currency_pair.rs` moved to top-level (single-file module, no folder needed)
+- Breaking: public module paths changed (`guilder_core::engine::` → `guilder_core::orderbook::`)
+  - Re-exports at crate root remain unchanged — `use guilder_core::{Orderbook, OrderbookEngine, ..}` still works
+
 ## 0.3.4 — 2026-04-05
 
 - Disable sequence gap detection and REST re-snapshot in `sync_loop` when `skip_initial_snapshot` is enabled
