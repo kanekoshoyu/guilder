@@ -3,6 +3,9 @@ name = "guilder-client-binance"
 version = "0.1.1"
 edition = "2021"
 description = "Binance client for the guilder multi-exchange crypto trading library"
+authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
+repository = "https://github.com/kanekoshoyu/guilder"
+license = "MIT"
 
 [dependencies]
 # development: path, deployment: version
