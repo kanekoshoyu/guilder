@@ -759,15 +759,37 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         });
 
         let resp = self.submit_signed_action(action, None).await?;
-        let oid = resp["response"]["data"]["statuses"][0]["resting"]["oid"]
-            .as_i64()
-            .or_else(|| resp["response"]["data"]["statuses"][0]["filled"]["oid"].as_i64())
-            .ok_or_else(|| format!("unexpected response: {}", resp))?;
+        let statuses = &resp["response"]["data"]["statuses"][0];
 
-        let timestamp_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
+        let (oid, returned_cloid, timestamp_ms) = if let Some(resting) = statuses.get("resting") {
+            let oid = resting["oid"]
+                .as_i64()
+                .ok_or_else(|| format!("resting status missing oid: {}", resp))?;
+            let returned_cloid = resting["cloid"].as_str().map(|s| s.to_string());
+            // resting doesn't include a timestamp
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            (oid, returned_cloid, ts)
+        } else if let Some(filled) = statuses.get("filled") {
+            let oid = filled["oid"]
+                .as_i64()
+                .ok_or_else(|| format!("filled status missing oid: {}", resp))?;
+            // filled doesn't include cloid
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            (oid, None, ts)
+        } else if let Some(error) = statuses.get("error") {
+            return Err(error
+                .as_str()
+                .unwrap_or("order rejected with unknown error")
+                .to_string());
+        } else {
+            return Err(format!("unexpected order status: {}", resp));
+        };
 
         Ok(OrderPlacement {
             order_id: oid,
@@ -776,7 +798,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             price,
             quantity: volume,
             timestamp_ms,
-            cloid,
+            cloid: returned_cloid.or(cloid),
         })
     }
 
