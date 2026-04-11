@@ -175,7 +175,10 @@ impl guilder_abstraction::SubscribeUserEvents for BinanceClient {
         Box::pin(stream::pending())
     }
 
-    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<Balance>, String>> {
+    fn subscribe_spot_balance_with_address(
+        &self,
+        address: String,
+    ) -> BoxStream<Result<Vec<Balance>, String>> {
         Box::pin(stream::pending())
     }
 }

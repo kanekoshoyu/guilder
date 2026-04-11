@@ -246,6 +246,7 @@ pub struct Balance {
 
 /// test server network connection
 #[allow(async_fn_in_trait)]
+#[allow(clippy::too_many_arguments)]
 pub trait TestServer {
 	/// test ping
 	async fn ping(&self) -> Result<bool, String>;
@@ -255,6 +256,7 @@ pub trait TestServer {
 
 /// get market data such as symbol, price and volume
 #[allow(async_fn_in_trait)]
+#[allow(clippy::too_many_arguments)]
 pub trait GetMarketData {
 	/// get symbol, such as BTCUSD
 	async fn get_symbol(&self) -> Result<Vec<String>, String>;
@@ -274,6 +276,7 @@ pub trait GetMarketData {
 
 /// place, change, cancel order
 #[allow(async_fn_in_trait)]
+#[allow(clippy::too_many_arguments)]
 pub trait ManageOrder {
 	/// place order with optional client order ID for end-to-end tracking
 	async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce, cloid: Option<String>) -> Result<OrderPlacement, String>;
@@ -287,6 +290,7 @@ pub trait ManageOrder {
 
 /// subscribe to streaming market data
 #[allow(async_fn_in_trait)]
+#[allow(clippy::too_many_arguments)]
 pub trait SubscribeMarketData {
 	/// subscribe to L2 orderbook updates for a symbol
 	fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>>;
@@ -300,6 +304,7 @@ pub trait SubscribeMarketData {
 
 /// query authenticated account snapshot
 #[allow(async_fn_in_trait)]
+#[allow(clippy::too_many_arguments)]
 pub trait GetAccountSnapshot {
 	/// get current open positions
 	async fn get_positions(&self) -> Result<Vec<Position>, String>;
@@ -315,6 +320,7 @@ pub trait GetAccountSnapshot {
 
 /// subscribe to authenticated user account events
 #[allow(async_fn_in_trait)]
+#[allow(clippy::too_many_arguments)]
 pub trait SubscribeUserEvents {
 	/// stream executions of the user's own orders
 	fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>>;

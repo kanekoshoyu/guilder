@@ -92,7 +92,10 @@ impl Orderbook {
     /// ordered best-to-worst (lowest ask first, highest bid first).
     /// If `depth` is `None`, returns all levels.
     pub fn snapshot(&self, depth: Option<usize>) -> Vec<(Side, f64, f64)> {
-        let ask_iter = self.asks.iter().map(|(p, v)| (Side::Ask, p.into_inner(), *v));
+        let ask_iter = self
+            .asks
+            .iter()
+            .map(|(p, v)| (Side::Ask, p.into_inner(), *v));
         let bid_iter = self
             .bids
             .iter()
@@ -111,11 +114,22 @@ impl Orderbook {
     /// Returns `None` if both sides are empty.
     pub fn imbalance(&self, top_n: Option<usize>) -> Option<f64> {
         let ask_liq: f64 = match top_n {
-            Some(n) => self.asks.iter().take(n).map(|(p, v)| p.into_inner() * v).sum(),
+            Some(n) => self
+                .asks
+                .iter()
+                .take(n)
+                .map(|(p, v)| p.into_inner() * v)
+                .sum(),
             None => self.asks.iter().map(|(p, v)| p.into_inner() * v).sum(),
         };
         let bid_liq: f64 = match top_n {
-            Some(n) => self.bids.iter().rev().take(n).map(|(p, v)| p.into_inner() * v).sum(),
+            Some(n) => self
+                .bids
+                .iter()
+                .rev()
+                .take(n)
+                .map(|(p, v)| p.into_inner() * v)
+                .sum(),
             None => self.bids.iter().map(|(p, v)| p.into_inner() * v).sum(),
         };
         let total = bid_liq + ask_liq;

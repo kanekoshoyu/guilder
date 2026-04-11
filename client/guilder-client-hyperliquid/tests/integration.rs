@@ -19,7 +19,10 @@ async fn test_subscribe_l2_update_receives_events() {
 
     assert_eq!(event.symbol, "BTC");
     assert!(event.price > Decimal::ZERO, "price should be positive");
-    assert!(event.volume >= Decimal::ZERO, "volume should be non-negative");
+    assert!(
+        event.volume >= Decimal::ZERO,
+        "volume should be non-negative"
+    );
 }
 
 /// Subscribes to BTC trade fills and asserts at least one event arrives within 30 s.

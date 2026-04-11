@@ -2,15 +2,14 @@
 ///
 /// Routes all subscriptions over a single shared WebSocket connection.
 /// Manages reconnection, keepalive, and message routing by (channel, coin) pairs.
-
 use futures_util::{SinkExt, StreamExt};
 use guilder_abstraction::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+use tokio::sync::RwLock;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
@@ -59,11 +58,7 @@ impl WsMux {
     }
 
     /// Subscribe to (channel, routing_key) and return a BoxStream of JSON strings.
-    pub(crate) fn subscribe(
-        &self,
-        key: SubKey,
-        subscription: Value,
-    ) -> BoxStream<String> {
+    pub(crate) fn subscribe(&self, key: SubKey, subscription: Value) -> BoxStream<String> {
         let (tx, rx) = mpsc::unbounded_channel();
         let req = SubRequest {
             key,

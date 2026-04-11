@@ -143,7 +143,15 @@ impl AccountState {
     /// This is the **only** method that writes to `AccountState`.
     pub fn apply(&mut self, event: &AccountEvent) -> Result<(), AccountError> {
         match event {
-            AccountEvent::OrderPlaced { order_id, symbol, side, price, quantity, trade_intent_uuid, .. } => {
+            AccountEvent::OrderPlaced {
+                order_id,
+                symbol,
+                side,
+                price,
+                quantity,
+                trade_intent_uuid,
+                ..
+            } => {
                 self.open_orders.insert(
                     *order_id,
                     OpenOrder {
@@ -164,7 +172,16 @@ impl AccountState {
                 self.open_orders.remove(order_id);
             }
 
-            AccountEvent::Fill { timestamp, order_id, symbol, side, price, quantity, fee_usd, trade_intent_uuid } => {
+            AccountEvent::Fill {
+                timestamp,
+                order_id,
+                symbol,
+                side,
+                price,
+                quantity,
+                fee_usd,
+                trade_intent_uuid,
+            } => {
                 if self.collateral_usd < *fee_usd {
                     return Err(AccountError::InsufficientCollateral {
                         have: self.collateral_usd,
@@ -251,7 +268,8 @@ impl AccountState {
                 // Keep bounded: retain only the last 200 fills.
                 const MAX_RECENT_FILLS: usize = 200;
                 if self.recent_fills.len() > MAX_RECENT_FILLS {
-                    self.recent_fills.drain(..self.recent_fills.len() - MAX_RECENT_FILLS);
+                    self.recent_fills
+                        .drain(..self.recent_fills.len() - MAX_RECENT_FILLS);
                 }
             }
 
@@ -274,14 +292,28 @@ impl AccountState {
                 self.collateral_usd -= amount_usd;
             }
 
-            AccountEvent::Snapshot { collateral_usd, positions, open_orders, .. } => {
+            AccountEvent::Snapshot {
+                collateral_usd,
+                positions,
+                open_orders,
+                ..
+            } => {
                 self.collateral_usd = *collateral_usd;
-                self.positions = positions.iter().map(|p| (p.symbol.clone(), p.clone())).collect();
-                self.open_orders = open_orders.iter().map(|o| (o.order_id, o.clone())).collect();
+                self.positions = positions
+                    .iter()
+                    .map(|p| (p.symbol.clone(), p.clone()))
+                    .collect();
+                self.open_orders = open_orders
+                    .iter()
+                    .map(|o| (o.order_id, o.clone()))
+                    .collect();
             }
 
             AccountEvent::SpotBalancesUpdated { balances, .. } => {
-                self.spot_balances = balances.iter().map(|b| (b.coin.clone(), b.clone())).collect();
+                self.spot_balances = balances
+                    .iter()
+                    .map(|b| (b.coin.clone(), b.clone()))
+                    .collect();
             }
         }
 
@@ -330,7 +362,10 @@ impl AccountState {
     }
 
     pub fn margin_used(&self) -> Decimal {
-        self.positions.values().map(|p| p.size * p.entry_price).sum()
+        self.positions
+            .values()
+            .map(|p| p.size * p.entry_price)
+            .sum()
     }
 
     pub fn free_collateral(&self, mark_prices: &HashMap<String, Decimal>) -> Decimal {
@@ -393,7 +428,9 @@ impl AccountState {
 
         for order_id in &snapshot.open_order_ids {
             if !self.open_orders.contains_key(order_id) {
-                diffs.push(ReconciliationDiff::UnknownOrder { order_id: *order_id });
+                diffs.push(ReconciliationDiff::UnknownOrder {
+                    order_id: *order_id,
+                });
             }
         }
 
@@ -422,9 +459,15 @@ mod tests {
     fn order_placed_adds_to_open_orders() {
         let mut s = AccountState::default();
         s.apply(&AccountEvent::OrderPlaced {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         assert_eq!(s.open_orders.len(), 1);
         let o = &s.open_orders[&1];
         assert_eq!(o.status, OrderStatus::Open);
@@ -435,12 +478,26 @@ mod tests {
     fn order_cancelled_removes_order_and_is_idempotent() {
         let mut s = AccountState::default();
         s.apply(&AccountEvent::OrderPlaced {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), trade_intent_uuid: None,
-        }).unwrap();
-        s.apply(&AccountEvent::OrderCancelled { timestamp: ts(), order_id: 1 }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            trade_intent_uuid: None,
+        })
+        .unwrap();
+        s.apply(&AccountEvent::OrderCancelled {
+            timestamp: ts(),
+            order_id: 1,
+        })
+        .unwrap();
         assert!(s.open_orders.is_empty());
-        s.apply(&AccountEvent::OrderCancelled { timestamp: ts(), order_id: 1 }).unwrap();
+        s.apply(&AccountEvent::OrderCancelled {
+            timestamp: ts(),
+            order_id: 1,
+        })
+        .unwrap();
     }
 
     // --- Fill: open new position ---
@@ -450,20 +507,36 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1000);
         s.apply(&AccountEvent::OrderPlaced {
-            timestamp: ts(), order_id: 1, symbol: "ETH".into(),
-            side: Side::Long, price: dec!(2000), quantity: dec!(1), trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "ETH".into(),
+            side: Side::Long,
+            price: dec!(2000),
+            quantity: dec!(1),
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "ETH".into(),
-            side: Side::Long, price: dec!(2000), quantity: dec!(1), fee_usd: dec!(2), trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "ETH".into(),
+            side: Side::Long,
+            price: dec!(2000),
+            quantity: dec!(1),
+            fee_usd: dec!(2),
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert_eq!(s.collateral_usd, dec!(998));
         let pos = s.positions.get("ETH").unwrap();
         assert_eq!(pos.side, Side::Long);
         assert_eq!(pos.size, dec!(1));
         assert_eq!(pos.entry_price, dec!(2000));
-        assert!(s.open_orders.is_empty(), "fully-filled order should be removed");
+        assert!(
+            s.open_orders.is_empty(),
+            "fully-filled order should be removed"
+        );
     }
 
     // --- Fill: weighted average entry ---
@@ -473,13 +546,27 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(40000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(40000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(60000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(60000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         let pos = s.positions.get("BTC").unwrap();
         assert_eq!(pos.size, dec!(2));
@@ -493,13 +580,27 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(40000), quantity: dec!(2), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(40000),
+            quantity: dec!(2),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "BTC".into(),
-            side: Side::Short, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "BTC".into(),
+            side: Side::Short,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert_eq!(s.realized_pnl, dec!(10000));
         assert_eq!(s.collateral_usd, dec!(20000)); // 10000 + 10000 pnl
@@ -512,13 +613,27 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "BTC".into(),
-            side: Side::Short, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "BTC".into(),
+            side: Side::Short,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert!(s.positions.is_empty());
         assert_eq!(s.realized_pnl, Decimal::ZERO); // bought and sold at same price
@@ -529,14 +644,30 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         let result = s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "BTC".into(),
-            side: Side::Short, price: dec!(50000), quantity: dec!(2), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "BTC".into(),
+            side: Side::Short,
+            price: dec!(50000),
+            quantity: dec!(2),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
         });
-        assert!(matches!(result, Err(AccountError::PositionSizeMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(AccountError::PositionSizeMismatch { .. })
+        ));
     }
 
     #[test]
@@ -544,10 +675,19 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1);
         let result = s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "ETH".into(),
-            side: Side::Long, price: dec!(2000), quantity: dec!(1), fee_usd: dec!(5), trade_intent_uuid: None,
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "ETH".into(),
+            side: Side::Long,
+            price: dec!(2000),
+            quantity: dec!(1),
+            fee_usd: dec!(5),
+            trade_intent_uuid: None,
         });
-        assert!(matches!(result, Err(AccountError::InsufficientCollateral { .. })));
+        assert!(matches!(
+            result,
+            Err(AccountError::InsufficientCollateral { .. })
+        ));
     }
 
     // --- Partial fill order status ---
@@ -557,13 +697,26 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::OrderPlaced {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(2), trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(2),
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         let o = &s.open_orders[&1];
         assert_eq!(o.status, OrderStatus::PartiallyFilled);
@@ -577,14 +730,20 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1000);
         s.apply(&AccountEvent::FundingPayment {
-            timestamp: ts(), symbol: "BTC".into(), amount_usd: dec!(-10),
-        }).unwrap();
+            timestamp: ts(),
+            symbol: "BTC".into(),
+            amount_usd: dec!(-10),
+        })
+        .unwrap();
         assert_eq!(s.collateral_usd, dec!(990));
         assert_eq!(s.funding_paid, dec!(-10));
 
         s.apply(&AccountEvent::FundingPayment {
-            timestamp: ts(), symbol: "BTC".into(), amount_usd: dec!(3),
-        }).unwrap();
+            timestamp: ts(),
+            symbol: "BTC".into(),
+            amount_usd: dec!(3),
+        })
+        .unwrap();
         assert_eq!(s.collateral_usd, dec!(993));
         assert_eq!(s.funding_paid, dec!(-7));
     }
@@ -594,10 +753,18 @@ mod tests {
     #[test]
     fn deposit_and_withdraw_adjust_collateral() {
         let mut s = AccountState::default();
-        s.apply(&AccountEvent::Deposit { timestamp: ts(), amount_usd: dec!(500) }).unwrap();
+        s.apply(&AccountEvent::Deposit {
+            timestamp: ts(),
+            amount_usd: dec!(500),
+        })
+        .unwrap();
         assert_eq!(s.collateral_usd, dec!(500));
 
-        s.apply(&AccountEvent::Withdraw { timestamp: ts(), amount_usd: dec!(200) }).unwrap();
+        s.apply(&AccountEvent::Withdraw {
+            timestamp: ts(),
+            amount_usd: dec!(200),
+        })
+        .unwrap();
         assert_eq!(s.collateral_usd, dec!(300));
     }
 
@@ -605,8 +772,14 @@ mod tests {
     fn withdraw_below_zero_returns_err() {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(100);
-        let result = s.apply(&AccountEvent::Withdraw { timestamp: ts(), amount_usd: dec!(200) });
-        assert!(matches!(result, Err(AccountError::InsufficientCollateral { .. })));
+        let result = s.apply(&AccountEvent::Withdraw {
+            timestamp: ts(),
+            amount_usd: dec!(200),
+        });
+        assert!(matches!(
+            result,
+            Err(AccountError::InsufficientCollateral { .. })
+        ));
         assert_eq!(s.collateral_usd, dec!(100));
     }
 
@@ -620,9 +793,15 @@ mod tests {
         s.apply(&AccountEvent::Snapshot {
             timestamp: ts(),
             collateral_usd: dec!(2000),
-            positions: vec![Position { symbol: "ETH".into(), side: Side::Long, size: dec!(1), entry_price: dec!(1800) }],
+            positions: vec![Position {
+                symbol: "ETH".into(),
+                side: Side::Long,
+                size: dec!(1),
+                entry_price: dec!(1800),
+            }],
             open_orders: vec![],
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(s.collateral_usd, dec!(2000));
         assert_eq!(s.positions.len(), 1);
@@ -635,16 +814,31 @@ mod tests {
     #[test]
     fn from_events_replay_matches_sequential_apply() {
         let events = vec![
-            AccountEvent::Deposit { timestamp: ts(), amount_usd: dec!(1000) },
-            AccountEvent::Fill {
-                timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-                side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: dec!(1), trade_intent_uuid: None,
+            AccountEvent::Deposit {
+                timestamp: ts(),
+                amount_usd: dec!(1000),
             },
-            AccountEvent::FundingPayment { timestamp: ts(), symbol: "BTC".into(), amount_usd: dec!(-2) },
+            AccountEvent::Fill {
+                timestamp: ts(),
+                order_id: 1,
+                symbol: "BTC".into(),
+                side: Side::Long,
+                price: dec!(50000),
+                quantity: dec!(1),
+                fee_usd: dec!(1),
+                trade_intent_uuid: None,
+            },
+            AccountEvent::FundingPayment {
+                timestamp: ts(),
+                symbol: "BTC".into(),
+                amount_usd: dec!(-2),
+            },
         ];
 
         let mut expected = AccountState::default();
-        for e in &events { expected.apply(e).unwrap(); }
+        for e in &events {
+            expected.apply(e).unwrap();
+        }
 
         let replayed = AccountState::from_events(&events);
         assert_eq!(replayed.collateral_usd, expected.collateral_usd);
@@ -658,27 +852,49 @@ mod tests {
     fn reconcile_detects_collateral_mismatch() {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1000);
-        let snap = ExchangeSnapshot { collateral_usd: dec!(999), positions: vec![], open_order_ids: vec![] };
+        let snap = ExchangeSnapshot {
+            collateral_usd: dec!(999),
+            positions: vec![],
+            open_order_ids: vec![],
+        };
         let diffs = s.reconcile(&snap);
-        assert!(diffs.iter().any(|d| matches!(d, ReconciliationDiff::CollateralMismatch { .. })));
+        assert!(diffs
+            .iter()
+            .any(|d| matches!(d, ReconciliationDiff::CollateralMismatch { .. })));
     }
 
     #[test]
     fn reconcile_detects_ghost_position() {
         let mut s = AccountState::default();
-        s.positions.insert("BTC".into(), Position {
-            symbol: "BTC".into(), side: Side::Long, size: dec!(1), entry_price: dec!(50000),
-        });
-        let snap = ExchangeSnapshot { collateral_usd: Decimal::ZERO, positions: vec![], open_order_ids: vec![] };
+        s.positions.insert(
+            "BTC".into(),
+            Position {
+                symbol: "BTC".into(),
+                side: Side::Long,
+                size: dec!(1),
+                entry_price: dec!(50000),
+            },
+        );
+        let snap = ExchangeSnapshot {
+            collateral_usd: Decimal::ZERO,
+            positions: vec![],
+            open_order_ids: vec![],
+        };
         let diffs = s.reconcile(&snap);
-        assert!(diffs.iter().any(|d| matches!(d, ReconciliationDiff::PositionMismatch { .. })));
+        assert!(diffs
+            .iter()
+            .any(|d| matches!(d, ReconciliationDiff::PositionMismatch { .. })));
     }
 
     #[test]
     fn reconcile_clean_state_produces_no_diffs() {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(500);
-        let snap = ExchangeSnapshot { collateral_usd: dec!(500), positions: vec![], open_order_ids: vec![] };
+        let snap = ExchangeSnapshot {
+            collateral_usd: dec!(500),
+            positions: vec![],
+            open_order_ids: vec![],
+        };
         assert!(s.reconcile(&snap).is_empty());
     }
 
@@ -689,9 +905,16 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "ETH".into(),
-            side: Side::Short, price: dec!(2000), quantity: dec!(1), fee_usd: dec!(2), trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "ETH".into(),
+            side: Side::Short,
+            price: dec!(2000),
+            quantity: dec!(1),
+            fee_usd: dec!(2),
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         let pos = s.positions.get("ETH").unwrap();
         assert_eq!(pos.side, Side::Short);
@@ -705,13 +928,27 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Short, price: dec!(50000), quantity: dec!(2), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Short,
+            price: dec!(50000),
+            quantity: dec!(2),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(40000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(40000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert_eq!(s.realized_pnl, dec!(10000));
         assert_eq!(s.collateral_usd, dec!(20000));
@@ -725,13 +962,27 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Short, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Short,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(60000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(60000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert!(s.positions.is_empty());
         assert_eq!(s.realized_pnl, dec!(-10000));
@@ -744,10 +995,14 @@ mod tests {
         let mut s = AccountState::default();
         s.apply(&AccountEvent::SpotBalancesUpdated {
             timestamp: ts(),
-            balances: vec![
-                SpotBalance { coin: "USDC".into(), total: dec!(5000), available: dec!(4000), locked: dec!(1000) },
-            ],
-        }).unwrap();
+            balances: vec![SpotBalance {
+                coin: "USDC".into(),
+                total: dec!(5000),
+                available: dec!(4000),
+                locked: dec!(1000),
+            }],
+        })
+        .unwrap();
 
         let usdc = s.spot_balances.get("USDC").unwrap();
         assert_eq!(usdc.total, dec!(5000));
@@ -763,9 +1018,16 @@ mod tests {
         s.collateral_usd = dec!(100000);
         for i in 0..250 {
             s.apply(&AccountEvent::Fill {
-                timestamp: ts(), order_id: i, symbol: "BTC".into(),
-                side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-            }).unwrap();
+                timestamp: ts(),
+                order_id: i,
+                symbol: "BTC".into(),
+                side: Side::Long,
+                price: dec!(50000),
+                quantity: dec!(1),
+                fee_usd: Decimal::ZERO,
+                trade_intent_uuid: None,
+            })
+            .unwrap();
         }
         assert_eq!(s.recent_fills.len(), 200);
         assert_eq!(s.recent_fills[0].order_id, 50);
@@ -780,13 +1042,26 @@ mod tests {
         s.collateral_usd = dec!(1000);
         let intent_id = Uuid::new_v4();
         s.apply(&AccountEvent::OrderPlaced {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(2), trade_intent_uuid: Some(intent_id),
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(2),
+            trade_intent_uuid: Some(intent_id),
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         let fill = s.recent_fills.last().unwrap();
         assert_eq!(fill.trade_intent_uuid, Some(intent_id));
@@ -799,13 +1074,27 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 2, symbol: "ETH".into(),
-            side: Side::Long, price: dec!(2000), quantity: dec!(2), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 2,
+            symbol: "ETH".into(),
+            side: Side::Long,
+            price: dec!(2000),
+            quantity: dec!(2),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert_eq!(s.positions.len(), 2);
         assert!(s.positions.contains_key("BTC"));
@@ -818,15 +1107,41 @@ mod tests {
     fn snapshot_overwrites_positions_and_orders() {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1000);
-        s.positions.insert("BTC".into(), Position { symbol: "BTC".into(), side: Side::Long, size: dec!(1), entry_price: dec!(50000) });
-        s.open_orders.insert(1, OpenOrder { order_id: 1, symbol: "BTC".into(), side: Side::Long, price: dec!(50000), quantity: dec!(1), filled_quantity: Decimal::ZERO, status: OrderStatus::Open, trade_intent_uuid: None });
+        s.positions.insert(
+            "BTC".into(),
+            Position {
+                symbol: "BTC".into(),
+                side: Side::Long,
+                size: dec!(1),
+                entry_price: dec!(50000),
+            },
+        );
+        s.open_orders.insert(
+            1,
+            OpenOrder {
+                order_id: 1,
+                symbol: "BTC".into(),
+                side: Side::Long,
+                price: dec!(50000),
+                quantity: dec!(1),
+                filled_quantity: Decimal::ZERO,
+                status: OrderStatus::Open,
+                trade_intent_uuid: None,
+            },
+        );
 
         s.apply(&AccountEvent::Snapshot {
             timestamp: ts(),
             collateral_usd: dec!(2000),
-            positions: vec![Position { symbol: "ETH".into(), side: Side::Short, size: dec!(5), entry_price: dec!(3000) }],
+            positions: vec![Position {
+                symbol: "ETH".into(),
+                side: Side::Short,
+                size: dec!(5),
+                entry_price: dec!(3000),
+            }],
             open_orders: vec![],
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(s.collateral_usd, dec!(2000));
         assert!(!s.positions.contains_key("BTC"));
@@ -841,9 +1156,16 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         let mut prices = HashMap::new();
         prices.insert("BTC".to_string(), dec!(52000));
@@ -856,9 +1178,16 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(10000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 1, symbol: "BTC".into(),
-            side: Side::Long, price: dec!(50000), quantity: dec!(2), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 1,
+            symbol: "BTC".into(),
+            side: Side::Long,
+            price: dec!(50000),
+            quantity: dec!(2),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         assert_eq!(s.margin_used(), dec!(100000));
     }
@@ -875,7 +1204,9 @@ mod tests {
             open_order_ids: vec![999],
         };
         let diffs = s.reconcile(&snap);
-        assert!(diffs.iter().any(|d| matches!(d, ReconciliationDiff::UnknownOrder { order_id: 999 })));
+        assert!(diffs
+            .iter()
+            .any(|d| matches!(d, ReconciliationDiff::UnknownOrder { order_id: 999 })));
     }
 
     #[test]
@@ -883,9 +1214,16 @@ mod tests {
         let mut s = AccountState::default();
         s.collateral_usd = dec!(1000);
         s.apply(&AccountEvent::Fill {
-            timestamp: ts(), order_id: 999, symbol: "ETH".into(),
-            side: Side::Long, price: dec!(2000), quantity: dec!(1), fee_usd: Decimal::ZERO, trade_intent_uuid: None,
-        }).unwrap();
+            timestamp: ts(),
+            order_id: 999,
+            symbol: "ETH".into(),
+            side: Side::Long,
+            price: dec!(2000),
+            quantity: dec!(1),
+            fee_usd: Decimal::ZERO,
+            trade_intent_uuid: None,
+        })
+        .unwrap();
 
         let pos = s.positions.get("ETH").unwrap();
         assert_eq!(pos.size, dec!(1));

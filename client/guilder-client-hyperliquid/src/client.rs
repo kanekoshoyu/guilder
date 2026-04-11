@@ -1,5 +1,4 @@
-use crate::rate_limiter::{RestRateLimiter, AddressRateLimiter};
-use alloy_primitives::Address;
+use crate::rate_limiter::{AddressRateLimiter, RestRateLimiter};
 use futures_util::{stream, StreamExt};
 use guilder_abstraction::{
     self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation, OpenOrder,
@@ -25,7 +24,7 @@ async fn parse_response<T: for<'de> serde::Deserialize<'de>>(
 
 pub struct HyperliquidClient {
     client: Client,
-    user_address: Option<Address>,
+    user_address: Option<String>,
     private_key: Option<String>,
     rest_limiter: Arc<RestRateLimiter>,
     address_limiter: Arc<AddressRateLimiter>,
@@ -50,10 +49,10 @@ impl HyperliquidClient {
         }
     }
 
-    pub fn with_auth(user_address: Address, private_key: String) -> Self {
+    pub fn with_auth(user_address: impl Into<String>, private_key: String) -> Self {
         HyperliquidClient {
             client: Client::new(),
-            user_address: Some(user_address),
+            user_address: Some(user_address.into()),
             private_key: Some(private_key),
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
@@ -70,7 +69,12 @@ impl HyperliquidClient {
     }
 
     /// POST to the info endpoint, consuming `weight` from the REST rate-limit budget.
-    async fn info_post(&self, body: Value, weight: u32, call: &str) -> Result<reqwest::Response, String> {
+    async fn info_post(
+        &self,
+        body: Value,
+        weight: u32,
+        call: &str,
+    ) -> Result<reqwest::Response, String> {
         self.rest_limiter.acquire_blocking(weight, call).await;
         self.client
             .post(HYPERLIQUID_INFO_URL)
@@ -82,7 +86,12 @@ impl HyperliquidClient {
 
     /// POST to the exchange endpoint, consuming `weight` from the REST rate-limit budget.
     /// Weight = 1 + floor(batch_length / 40).
-    async fn exchange_post(&self, body: Value, weight: u32, call: &str) -> Result<reqwest::Response, String> {
+    async fn exchange_post(
+        &self,
+        body: Value,
+        weight: u32,
+        call: &str,
+    ) -> Result<reqwest::Response, String> {
         self.rest_limiter.acquire_blocking(weight, call).await;
         self.client
             .post(HYPERLIQUID_EXCHANGE_URL)
@@ -94,7 +103,7 @@ impl HyperliquidClient {
 
     fn require_user_address(&self) -> Result<String, String> {
         self.user_address
-            .map(|a| format!("{:#x}", a))
+            .clone()
             .ok_or_else(|| "user address required: use HyperliquidClient::with_auth".to_string())
     }
 
@@ -137,7 +146,9 @@ impl HyperliquidClient {
         });
 
         // Single unbatched action → exchange weight 1
-        let resp = self.exchange_post(payload, 1, "submit_signed_action").await?;
+        let resp = self
+            .exchange_post(payload, 1, "submit_signed_action")
+            .await?;
 
         let body: Value = parse_response(resp).await?;
         if body["status"].as_str() == Some("err") {
@@ -497,7 +508,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_open_interest(&self, symbol: String) -> Result<Decimal, String> {
         // metaAndAssetCtxs → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20, "get_open_interest")
+            .info_post(
+                serde_json::json!({"type": "metaAndAssetCtxs"}),
+                20,
+                "get_open_interest",
+            )
             .await?;
         let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
             .await?
@@ -514,7 +529,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String> {
         // metaAndAssetCtxs → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20, "get_asset_context")
+            .info_post(
+                serde_json::json!({"type": "metaAndAssetCtxs"}),
+                20,
+                "get_asset_context",
+            )
             .await?;
         let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
             .await?
@@ -545,7 +564,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String> {
         // metaAndAssetCtxs → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "metaAndAssetCtxs"}), 20, "get_all_asset_contexts")
+            .info_post(
+                serde_json::json!({"type": "metaAndAssetCtxs"}),
+                20,
+                "get_all_asset_contexts",
+            )
             .await?;
         let (meta, ctxs) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
             .await?
@@ -584,7 +607,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
         // l2Book → weight 2
         let resp = self
-            .info_post(serde_json::json!({"type": "l2Book", "coin": symbol}), 2, "get_l2_orderbook")
+            .info_post(
+                serde_json::json!({"type": "l2Book", "coin": symbol}),
+                2,
+                "get_l2_orderbook",
+            )
             .await?;
         let book: Option<WsBook> = parse_response(resp).await?;
         let book = match book {
@@ -639,7 +666,11 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     async fn get_predicted_fundings(&self) -> Result<Vec<PredictedFunding>, String> {
         // predictedFundings → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "predictedFundings"}), 20, "get_predicted_fundings")
+            .info_post(
+                serde_json::json!({"type": "predictedFundings"}),
+                20,
+                "get_predicted_fundings",
+            )
             .await?;
         let data: PredictedFundingsResponse = parse_response(resp).await?;
         let mut result = Vec::new();
@@ -744,7 +775,11 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // openOrders → weight 20; get_asset_index → meta weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "change_order_by_cloid")
+            .info_post(
+                serde_json::json!({"type": "openOrders", "user": user}),
+                20,
+                "change_order_by_cloid",
+            )
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders
@@ -781,7 +816,11 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // openOrders → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "cancel_order")
+            .info_post(
+                serde_json::json!({"type": "openOrders", "user": user}),
+                20,
+                "cancel_order",
+            )
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders
@@ -806,7 +845,11 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // openOrders → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "cancel_all_order")
+            .info_post(
+                serde_json::json!({"type": "openOrders", "user": user}),
+                20,
+                "cancel_all_order",
+            )
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         if orders.is_empty() {
@@ -941,34 +984,36 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
             routing_key: user,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
-        Box::pin(raw_stream.filter_map(|text| async move {
-            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                return None;
-            };
-            if env.channel != "userEvents" {
-                return None;
-            }
-            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
-                return None;
-            };
-            let Some(liq) = event.liquidation else {
-                return None;
-            };
-            let (Some(notional_position), Some(account_value)) = (
-                parse_decimal(&liq.liquidated_ntl_pos),
-                parse_decimal(&liq.liquidated_account_value),
-            ) else {
-                return None;
-            };
-            let item = Liquidation {
-                symbol: String::new(),
-                side: OrderSide::Sell,
-                liquidated_user: liq.liquidated_user,
-                notional_position,
-                account_value,
-            };
-            Some(stream::iter(vec![Ok(item)].into_iter()))
-        }).flatten())
+        Box::pin(
+            raw_stream
+                .filter_map(|text| async move {
+                    let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                        return None;
+                    };
+                    if env.channel != "userEvents" {
+                        return None;
+                    }
+                    let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
+                        return None;
+                    };
+                    let liq = event.liquidation?;
+                    let (Some(notional_position), Some(account_value)) = (
+                        parse_decimal(&liq.liquidated_ntl_pos),
+                        parse_decimal(&liq.liquidated_account_value),
+                    ) else {
+                        return None;
+                    };
+                    let item = Liquidation {
+                        symbol: String::new(),
+                        side: OrderSide::Sell,
+                        liquidated_user: liq.liquidated_user,
+                        notional_position,
+                        account_value,
+                    };
+                    Some(stream::iter(vec![Ok(item)]))
+                })
+                .flatten(),
+        )
     }
 
     fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>> {
@@ -1067,7 +1112,11 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
         let user = self.require_user_address()?;
         // openOrders → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "openOrders", "user": user}), 20, "get_open_orders")
+            .info_post(
+                serde_json::json!({"type": "openOrders", "user": user}),
+                20,
+                "get_open_orders",
+            )
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
 
@@ -1143,7 +1192,8 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
         let state: SpotStateResponse = parse_response(resp).await?;
 
-        state.balances
+        state
+            .balances
             .into_iter()
             .map(|balance| {
                 let total = parse_decimal(&balance.total)
@@ -1164,7 +1214,10 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
     /// Returns clearing house collateral balance for an asset. Currently returns the total collateral.
     /// Requires `with_auth`.
-    async fn get_collateral_balance(&self, asset: String) -> Result<guilder_abstraction::Balance, String> {
+    async fn get_collateral_balance(
+        &self,
+        asset: String,
+    ) -> Result<guilder_abstraction::Balance, String> {
         if asset.to_uppercase() != "USDC" {
             return Err(format!("only USDC collateral is supported, got {}", asset));
         }
@@ -1182,10 +1235,10 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>> {
-        let Some(addr) = self.user_address else {
+        let Some(addr) = self.user_address.as_ref() else {
             return Box::pin(stream::empty());
         };
-        let addr_str = format!("{:#x}", addr);
+        let addr_str = addr.clone();
         let sub = serde_json::json!({
             "method": "subscribe",
             "subscription": {"type": "userEvents", "user": addr_str.clone()}
@@ -1195,54 +1248,58 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
-        Box::pin(raw_stream.filter_map(|text| async move {
-            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                return None;
-            };
-            if env.channel != "userEvents" {
-                return None;
-            }
-            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
-                return None;
-            };
-            let items: Vec<_> = event
-                .fills
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|fill| {
-                    let side = if fill.side == "B" {
-                        OrderSide::Buy
-                    } else {
-                        OrderSide::Sell
+        Box::pin(
+            raw_stream
+                .filter_map(|text| async move {
+                    let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                        return None;
                     };
-                    let price = parse_decimal(&fill.px)?;
-                    let quantity = parse_decimal(&fill.sz)?;
-                    let fee_usd = parse_decimal(&fill.fee)?;
-                    Some(UserFill {
-                        order_id: fill.oid,
-                        symbol: fill.coin,
-                        side,
-                        price,
-                        quantity,
-                        fee_usd,
-                        timestamp_ms: fill.time,
-                        cloid: fill.cloid,
-                    })
+                    if env.channel != "userEvents" {
+                        return None;
+                    }
+                    let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
+                        return None;
+                    };
+                    let items: Vec<_> = event
+                        .fills
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|fill| {
+                            let side = if fill.side == "B" {
+                                OrderSide::Buy
+                            } else {
+                                OrderSide::Sell
+                            };
+                            let price = parse_decimal(&fill.px)?;
+                            let quantity = parse_decimal(&fill.sz)?;
+                            let fee_usd = parse_decimal(&fill.fee)?;
+                            Some(UserFill {
+                                order_id: fill.oid,
+                                symbol: fill.coin,
+                                side,
+                                price,
+                                quantity,
+                                fee_usd,
+                                timestamp_ms: fill.time,
+                                cloid: fill.cloid,
+                            })
+                        })
+                        .collect();
+                    if items.is_empty() {
+                        None
+                    } else {
+                        Some(stream::iter(items.into_iter().map(Ok)))
+                    }
                 })
-                .collect();
-            if items.is_empty() {
-                None
-            } else {
-                Some(stream::iter(items.into_iter().map(Ok)))
-            }
-        }).flatten())
+                .flatten(),
+        )
     }
 
     fn subscribe_order_updates(&self) -> BoxStream<Result<OrderUpdate, String>> {
-        let Some(addr) = self.user_address else {
+        let Some(addr) = self.user_address.as_ref() else {
             return Box::pin(stream::empty());
         };
-        let addr_str = format!("{:#x}", addr);
+        let addr_str = addr.clone();
         let sub = serde_json::json!({
             "method": "subscribe",
             "subscription": {"type": "orderUpdates", "user": addr_str.clone()}
@@ -1252,56 +1309,60 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
-        Box::pin(raw_stream.filter_map(|text| async move {
-            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                return None;
-            };
-            if env.channel != "orderUpdates" {
-                return None;
-            }
-            let Ok(updates) = serde_json::from_value::<Vec<WsOrderUpdate>>(env.data) else {
-                return None;
-            };
-            let items: Vec<_> = updates
-                .into_iter()
-                .map(|upd| {
-                    let status = match upd.status.as_str() {
-                        "open" => OrderStatus::Placed,
-                        "filled" => OrderStatus::Filled,
-                        "canceled" | "cancelled" => OrderStatus::Cancelled,
-                        _ => OrderStatus::PartiallyFilled,
+        Box::pin(
+            raw_stream
+                .filter_map(|text| async move {
+                    let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                        return None;
                     };
-                    let side = if upd.order.side == "B" {
-                        OrderSide::Buy
+                    if env.channel != "orderUpdates" {
+                        return None;
+                    }
+                    let Ok(updates) = serde_json::from_value::<Vec<WsOrderUpdate>>(env.data) else {
+                        return None;
+                    };
+                    let items: Vec<_> = updates
+                        .into_iter()
+                        .map(|upd| {
+                            let status = match upd.status.as_str() {
+                                "open" => OrderStatus::Placed,
+                                "filled" => OrderStatus::Filled,
+                                "canceled" | "cancelled" => OrderStatus::Cancelled,
+                                _ => OrderStatus::PartiallyFilled,
+                            };
+                            let side = if upd.order.side == "B" {
+                                OrderSide::Buy
+                            } else {
+                                OrderSide::Sell
+                            };
+                            OrderUpdate {
+                                order_id: upd.order.oid,
+                                symbol: upd.order.coin,
+                                status,
+                                side: Some(side),
+                                price: parse_decimal(&upd.order.limit_px),
+                                quantity: parse_decimal(&upd.order.orig_sz),
+                                remaining_quantity: parse_decimal(&upd.order.sz),
+                                timestamp_ms: upd.status_timestamp,
+                                cloid: upd.order.cloid,
+                            }
+                        })
+                        .collect();
+                    if items.is_empty() {
+                        None
                     } else {
-                        OrderSide::Sell
-                    };
-                    OrderUpdate {
-                        order_id: upd.order.oid,
-                        symbol: upd.order.coin,
-                        status,
-                        side: Some(side),
-                        price: parse_decimal(&upd.order.limit_px),
-                        quantity: parse_decimal(&upd.order.orig_sz),
-                        remaining_quantity: parse_decimal(&upd.order.sz),
-                        timestamp_ms: upd.status_timestamp,
-                        cloid: upd.order.cloid,
+                        Some(stream::iter(items.into_iter().map(Ok)))
                     }
                 })
-                .collect();
-            if items.is_empty() {
-                None
-            } else {
-                Some(stream::iter(items.into_iter().map(Ok)))
-            }
-        }).flatten())
+                .flatten(),
+        )
     }
 
     fn subscribe_funding_payments(&self) -> BoxStream<Result<FundingPayment, String>> {
-        let Some(addr) = self.user_address else {
+        let Some(addr) = self.user_address.as_ref() else {
             return Box::pin(stream::empty());
         };
-        let addr_str = format!("{:#x}", addr);
+        let addr_str = addr.clone();
         let sub = serde_json::json!({
             "method": "subscribe",
             "subscription": {"type": "userEvents", "user": addr_str.clone()}
@@ -1311,36 +1372,36 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
-        Box::pin(raw_stream.filter_map(|text| async move {
-            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                return None;
-            };
-            if env.channel != "userEvents" {
-                return None;
-            }
-            let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
-                return None;
-            };
-            let Some(funding) = event.funding else {
-                return None;
-            };
-            let Some(amount_usd) = parse_decimal(&funding.usdc) else {
-                return None;
-            };
-            let item = FundingPayment {
-                symbol: funding.coin,
-                amount_usd,
-                timestamp_ms: funding.time,
-            };
-            Some(stream::iter(vec![Ok(item)].into_iter()))
-        }).flatten())
+        Box::pin(
+            raw_stream
+                .filter_map(|text| async move {
+                    let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                        return None;
+                    };
+                    if env.channel != "userEvents" {
+                        return None;
+                    }
+                    let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
+                        return None;
+                    };
+                    let funding = event.funding?;
+                    let amount_usd = parse_decimal(&funding.usdc)?;
+                    let item = FundingPayment {
+                        symbol: funding.coin,
+                        amount_usd,
+                        timestamp_ms: funding.time,
+                    };
+                    Some(stream::iter(vec![Ok(item)]))
+                })
+                .flatten(),
+        )
     }
 
     fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>> {
-        let Some(addr) = self.user_address else {
+        let Some(addr) = self.user_address.as_ref() else {
             return Box::pin(stream::empty());
         };
-        let addr_str = format!("{:#x}", addr);
+        let addr_str = addr.clone();
         let sub = serde_json::json!({
             "method": "subscribe",
             "subscription": {"type": "userNonFundingLedgerUpdates", "user": addr_str.clone()}
@@ -1350,44 +1411,48 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
-        Box::pin(raw_stream.filter_map(|text| async move {
-            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                return None;
-            };
-            if env.channel != "userNonFundingLedgerUpdates" {
-                return None;
-            }
-            let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else {
-                return None;
-            };
-            let items: Vec<_> = ledger
-                .updates
-                .into_iter()
-                .filter_map(|e| {
-                    if e.delta.kind != "deposit" {
+        Box::pin(
+            raw_stream
+                .filter_map(|text| async move {
+                    let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                        return None;
+                    };
+                    if env.channel != "userNonFundingLedgerUpdates" {
                         return None;
                     }
-                    let amount_usd = e.delta.usdc.as_deref().and_then(parse_decimal)?;
-                    Some(Deposit {
-                        asset: "USDC".to_string(),
-                        amount_usd,
-                        timestamp_ms: e.time,
-                    })
+                    let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else {
+                        return None;
+                    };
+                    let items: Vec<_> = ledger
+                        .updates
+                        .into_iter()
+                        .filter_map(|e| {
+                            if e.delta.kind != "deposit" {
+                                return None;
+                            }
+                            let amount_usd = e.delta.usdc.as_deref().and_then(parse_decimal)?;
+                            Some(Deposit {
+                                asset: "USDC".to_string(),
+                                amount_usd,
+                                timestamp_ms: e.time,
+                            })
+                        })
+                        .collect();
+                    if items.is_empty() {
+                        None
+                    } else {
+                        Some(stream::iter(items.into_iter().map(Ok)))
+                    }
                 })
-                .collect();
-            if items.is_empty() {
-                None
-            } else {
-                Some(stream::iter(items.into_iter().map(Ok)))
-            }
-        }).flatten())
+                .flatten(),
+        )
     }
 
     fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
-        let Some(addr) = self.user_address else {
+        let Some(addr) = self.user_address.as_ref() else {
             return Box::pin(stream::empty());
         };
-        let addr_str = format!("{:#x}", addr);
+        let addr_str = addr.clone();
         let sub = serde_json::json!({
             "method": "subscribe",
             "subscription": {"type": "userNonFundingLedgerUpdates", "user": addr_str.clone()}
@@ -1397,51 +1462,62 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
-        Box::pin(raw_stream.filter_map(|text| async move {
-            let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
-                return None;
-            };
-            if env.channel != "userNonFundingLedgerUpdates" {
-                return None;
-            }
-            let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else {
-                return None;
-            };
-            let items: Vec<_> = ledger
-                .updates
-                .into_iter()
-                .filter_map(|e| {
-                    if e.delta.kind != "withdraw" {
+        Box::pin(
+            raw_stream
+                .filter_map(|text| async move {
+                    let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
+                        return None;
+                    };
+                    if env.channel != "userNonFundingLedgerUpdates" {
                         return None;
                     }
-                    let amount_usd = e.delta.usdc.as_deref().and_then(parse_decimal)?;
-                    Some(Withdrawal {
-                        asset: "USDC".to_string(),
-                        amount_usd,
-                        timestamp_ms: e.time,
-                    })
+                    let Ok(ledger) = serde_json::from_value::<WsLedgerUpdates>(env.data) else {
+                        return None;
+                    };
+                    let items: Vec<_> = ledger
+                        .updates
+                        .into_iter()
+                        .filter_map(|e| {
+                            if e.delta.kind != "withdraw" {
+                                return None;
+                            }
+                            let amount_usd = e.delta.usdc.as_deref().and_then(parse_decimal)?;
+                            Some(Withdrawal {
+                                asset: "USDC".to_string(),
+                                amount_usd,
+                                timestamp_ms: e.time,
+                            })
+                        })
+                        .collect();
+                    if items.is_empty() {
+                        None
+                    } else {
+                        Some(stream::iter(items.into_iter().map(Ok)))
+                    }
                 })
-                .collect();
-            if items.is_empty() {
-                None
-            } else {
-                Some(stream::iter(items.into_iter().map(Ok)))
-            }
-        }).flatten())
+                .flatten(),
+        )
     }
 
     /// Subscribe to spot wallet balance updates for the registered user address.
     /// Requires authentication (address must be set). Returns error if address not registered.
-    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
-        let Some(addr) = self.user_address else {
-            return Box::pin(stream::iter(vec![Err("user address not registered".to_string())]));
+    fn subscribe_spot_balance(
+        &self,
+    ) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
+        let Some(addr) = self.user_address.as_ref() else {
+            return Box::pin(stream::iter(vec![Err(
+                "user address not registered".to_string()
+            )]));
         };
-        let addr_str = format!("{:#x}", addr);
+        let addr_str = addr.clone();
         self.subscribe_spot_balance_with_address(addr_str)
     }
 
     /// Subscribe to spot wallet balance updates for a specific address.
-    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
+    fn subscribe_spot_balance_with_address(
+        &self,
+        address: String,
+    ) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
         let addr_str = address;
         let sub = serde_json::json!({
             "method": "subscribe",

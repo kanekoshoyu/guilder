@@ -1,6 +1,6 @@
 [package]
 name = "guilder-client-hyperliquid"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 description = "Hyperliquid client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -13,19 +13,18 @@ path = "src/bin/guilder_stress_test.rs"
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = "0.1.15"
+guilder-abstraction = "0.1.16"
 reqwest = { workspace = true, features = ["json"] }
 futures-core.workspace = true
 futures-util = "0.3"
 serde = { workspace = true }
 serde_json.workspace = true
 rust_decimal = "1"
-alloy-primitives = { version = "0.8", features = ["serde"] }
 tokio.workspace = true
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 async-stream = "0.3"
 k256 = { version = "0.13", features = ["ecdsa"] }
-sha3 = "0.10"
+sha3 = "0.11"
 hex = "0.4"
 rmp-serde = "1"
 tracing = "0.1"

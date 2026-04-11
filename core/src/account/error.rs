@@ -4,9 +4,18 @@ use rust_decimal::Decimal;
 
 #[derive(Debug, Clone)]
 pub enum AccountError {
-    InsufficientCollateral { have: Decimal, need: Decimal },
-    OrderNotFound { order_id: u64 },
-    PositionSizeMismatch { symbol: String, reduce: Decimal, have: Decimal },
+    InsufficientCollateral {
+        have: Decimal,
+        need: Decimal,
+    },
+    OrderNotFound {
+        order_id: u64,
+    },
+    PositionSizeMismatch {
+        symbol: String,
+        reduce: Decimal,
+        have: Decimal,
+    },
 }
 
 impl fmt::Display for AccountError {
@@ -18,8 +27,15 @@ impl fmt::Display for AccountError {
             AccountError::OrderNotFound { order_id } => {
                 write!(f, "order {order_id} not found")
             }
-            AccountError::PositionSizeMismatch { symbol, reduce, have } => {
-                write!(f, "position size mismatch for {symbol}: reduce by {reduce} but size is {have}")
+            AccountError::PositionSizeMismatch {
+                symbol,
+                reduce,
+                have,
+            } => {
+                write!(
+                    f,
+                    "position size mismatch for {symbol}: reduce by {reduce} but size is {have}"
+                )
             }
         }
     }
@@ -42,7 +58,16 @@ pub struct ExchangeSnapshot {
 
 #[derive(Debug, Clone)]
 pub enum ReconciliationDiff {
-    CollateralMismatch { local: Decimal, exchange: Decimal },
-    PositionMismatch { symbol: String, local: Decimal, exchange: Decimal },
-    UnknownOrder { order_id: u64 },
+    CollateralMismatch {
+        local: Decimal,
+        exchange: Decimal,
+    },
+    PositionMismatch {
+        symbol: String,
+        local: Decimal,
+        exchange: Decimal,
+    },
+    UnknownOrder {
+        order_id: u64,
+    },
 }

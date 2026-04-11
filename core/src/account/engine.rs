@@ -20,7 +20,11 @@ pub struct AccountEngine {
 
 impl AccountEngine {
     /// Creates a new engine and returns the receiver half.
-    pub fn new() -> (Self, mpsc::UnboundedReceiver<AccountEvent>, Arc<ArcSwap<AccountState>>) {
+    pub fn new() -> (
+        Self,
+        mpsc::UnboundedReceiver<AccountEvent>,
+        Arc<ArcSwap<AccountState>>,
+    ) {
         let (tx, rx) = mpsc::unbounded_channel();
         let state = Arc::new(ArcSwap::from_pointee(AccountState::default()));
         (

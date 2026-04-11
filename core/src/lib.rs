@@ -7,10 +7,12 @@ pub mod orderbook;
 pub mod account;
 
 #[cfg(feature = "engine")]
-pub use orderbook::{BookUpdate, CurrencyPair, EngineError, IndexOrderbook, Orderbook, OrderbookEngine};
+pub use orderbook::{
+    BookUpdate, CurrencyPair, EngineError, IndexOrderbook, Orderbook, OrderbookEngine,
+};
 
 #[cfg(feature = "account")]
 pub use account::{
     AccountEngine, AccountError, AccountEvent, AccountState, ExchangeSnapshot, OpenOrder,
-    OrderStatus, Position, ReconciliationDiff, RecentFill, Side, SpotBalance,
+    OrderStatus, Position, RecentFill, ReconciliationDiff, Side, SpotBalance,
 };

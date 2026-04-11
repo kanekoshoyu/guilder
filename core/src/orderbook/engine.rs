@@ -172,9 +172,9 @@ where
     /// Non-blocking: add symbols to a running `track()` loop.
     /// The engine will snapshot and start sync loops for them in the background.
     pub fn track_additional(&self, symbols: Vec<String>) -> Result<(), EngineError> {
-        self.add_tx.send(symbols).map_err(|e| {
-            EngineError::Client(format!("track loop not running: {e}"))
-        })
+        self.add_tx
+            .send(symbols)
+            .map_err(|e| EngineError::Client(format!("track loop not running: {e}")))
     }
 
     /// Snapshot and insert initial orderbooks for a batch of symbols.
@@ -209,11 +209,7 @@ where
 
     /// Returns the top `depth` levels per side for a symbol.
     /// If `depth` is `None`, returns all levels.
-    pub fn snapshot(
-        &self,
-        symbol: &str,
-        depth: Option<usize>,
-    ) -> Option<Vec<(Side, f64, f64)>> {
+    pub fn snapshot(&self, symbol: &str, depth: Option<usize>) -> Option<Vec<(Side, f64, f64)>> {
         let book = self.books.get(symbol)?;
         Some(book.snapshot(depth))
     }

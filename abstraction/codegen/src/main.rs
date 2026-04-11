@@ -430,6 +430,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
         if tr.r#async {
             code.push_str("#[allow(async_fn_in_trait)]\n");
         }
+        code.push_str("#[allow(clippy::too_many_arguments)]\n");
         code.push_str(&format!("pub trait {} {{\n", tr.name));
 
         for method in tr.methods {
