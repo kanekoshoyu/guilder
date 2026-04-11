@@ -18,8 +18,25 @@ const HYPERLIQUID_EXCHANGE_URL: &str = "https://api.hyperliquid.xyz/exchange";
 async fn parse_response<T: for<'de> serde::Deserialize<'de>>(
     resp: reqwest::Response,
 ) -> Result<T, String> {
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| format!("{e}: {text}"))
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| {
+        format!("failed to read response body (status {status}): {e}")
+    })?;
+
+    if text.is_empty() {
+        return Err(format!(
+            "empty response body from Hyperliquid (HTTP {status})"
+        ));
+    }
+
+    serde_json::from_str(&text).map_err(|e| {
+        let snippet = if text.len() > 512 {
+            format!("{}... ({} bytes total)", &text[..256], text.len())
+        } else {
+            text.clone()
+        };
+        format!("deserialize error (HTTP {status}): {e}: {snippet}")
+    })
 }
 
 pub struct HyperliquidClient {
@@ -1228,6 +1245,41 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             total,
             available: total,
             locked: Decimal::ZERO,
+        })
+    }
+
+    /// Returns the user's address-level API rate limit budget.
+    /// Queries Hyperliquid's `userRateLimit` info endpoint for authoritative server-side counts.
+    async fn get_user_rate_limit(&self) -> Result<guilder_abstraction::UserRateLimit, String> {
+        let user = self.require_user_address()?;
+        let resp = self
+            .info_post(
+                serde_json::json!({"type": "userRateLimit", "user": user}),
+                20,
+                "get_user_rate_limit",
+            )
+            .await?;
+        let val = parse_response::<Value>(resp).await?;
+
+        let cumulative_volume = val["cumVlm"]
+            .as_str()
+            .and_then(parse_decimal)
+            .ok_or_else(|| "missing or invalid cumVlm".to_string())?;
+        let requests_used = val["nRequestsUsed"]
+            .as_i64()
+            .ok_or_else(|| "missing or invalid nRequestsUsed".to_string())?;
+        let requests_cap = val["nRequestsCap"]
+            .as_i64()
+            .ok_or_else(|| "missing or invalid nRequestsCap".to_string())?;
+        let requests_surplus = val["nRequestsSurplus"]
+            .as_i64()
+            .ok_or_else(|| "missing or invalid nRequestsSurplus".to_string())?;
+
+        Ok(guilder_abstraction::UserRateLimit {
+            cumulative_volume,
+            requests_used,
+            requests_cap,
+            requests_surplus,
         })
     }
 }

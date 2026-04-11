@@ -159,6 +159,10 @@ traits:
           - name: asset
             type: String
 
+      - name: get_user_rate_limit
+        description: get user's address-level API rate limit budget (remaining requests, cumulative volume, cap)
+        return_type: Result<UserRateLimit, String>
+
   - name: SubscribeUserEvents
     description: subscribe to authenticated user account events
     async: true
@@ -490,3 +494,19 @@ structs:
         type: Decimal
       - name: locked
         type: Decimal
+
+  - name: UserRateLimit
+    description: user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint
+    values:
+      - name: cumulative_volume
+        type: Decimal
+        description: cumulative trading volume in USDC
+      - name: requests_used
+        type: i64
+        description: number of API requests consumed
+      - name: requests_cap
+        type: i64
+        description: total request allowance
+      - name: requests_surplus
+        type: i64
+        description: remaining reserved capacity

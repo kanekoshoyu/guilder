@@ -244,6 +244,15 @@ pub struct Balance {
 	pub locked: Decimal,
 }
 
+/// user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint
+#[derive(Debug, Clone)]
+pub struct UserRateLimit {
+	pub cumulative_volume: Decimal,
+	pub requests_used: i64,
+	pub requests_cap: i64,
+	pub requests_surplus: i64,
+}
+
 /// test server network connection
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
@@ -316,6 +325,8 @@ pub trait GetAccountSnapshot {
 	async fn get_spot_balance(&self) -> Result<Vec<Balance>, String>;
 	/// get clearing house collateral balance (typically USDC only)
 	async fn get_collateral_balance(&self, asset: String) -> Result<Balance, String>;
+	/// get user's address-level API rate limit budget (remaining requests, cumulative volume, cap)
+	async fn get_user_rate_limit(&self) -> Result<UserRateLimit, String>;
 }
 
 /// subscribe to authenticated user account events
