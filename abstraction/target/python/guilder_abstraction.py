@@ -185,6 +185,14 @@ class Balance:
 		self.available = available
 		self.locked = locked
 
+class UserRateLimit:
+	"""user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint"""
+	def __init__(self, cumulative_volume: str, requests_used: int, requests_cap: int, requests_surplus: int):
+		self.cumulative_volume = cumulative_volume
+		self.requests_used = requests_used
+		self.requests_cap = requests_cap
+		self.requests_surplus = requests_surplus
+
 class TestServer(ABC):
 	"""test server network connection"""
 	@abstractmethod
@@ -307,6 +315,11 @@ class GetAccountSnapshot(ABC):
 	@abstractmethod
 	async def get_collateral_balance(self, asset: str) -> Result<Balance, String>:
 		"""get clearing house collateral balance (typically USDC only)"""
+		pass
+
+	@abstractmethod
+	async def get_user_rate_limit(self) -> Result<UserRateLimit, String>:
+		"""get user's address-level API rate limit budget (remaining requests, cumulative volume, cap)"""
 		pass
 
 
