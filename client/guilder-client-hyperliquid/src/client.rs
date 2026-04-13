@@ -86,13 +86,20 @@ impl HyperliquidClient {
     }
 
     /// POST to the info endpoint, consuming `weight` from the REST rate-limit budget.
+    /// Returns `Err("rate_limited: ...")` immediately if budget is exhausted — no retry.
+    /// Callers should handle gracefully (skip cycle, retry later, etc.).
     async fn info_post(
         &self,
         body: Value,
         weight: u32,
         call: &str,
     ) -> Result<reqwest::Response, String> {
-        self.rest_limiter.acquire_blocking(weight, call).await;
+        self.rest_limiter.acquire(weight).await.map_err(|e| {
+            format!(
+                "rate_limited: info_post ({call}) budget exhausted, retry_after_ms={}",
+                e.retry_after.as_millis()
+            )
+        })?;
         self.client
             .post(HYPERLIQUID_INFO_URL)
             .json(&body)
