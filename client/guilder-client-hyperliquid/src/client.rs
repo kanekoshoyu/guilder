@@ -100,24 +100,6 @@ impl HyperliquidClient {
             .await
             .map_err(|e| e.to_string())
     }
-
-    /// POST to the exchange endpoint, consuming `weight` from the REST rate-limit budget.
-    /// Weight = 1 + floor(batch_length / 40).
-    async fn exchange_post(
-        &self,
-        body: Value,
-        weight: u32,
-        call: &str,
-    ) -> Result<reqwest::Response, String> {
-        self.rest_limiter.acquire_blocking(weight, call).await;
-        self.client
-            .post(HYPERLIQUID_EXCHANGE_URL)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())
-    }
-
     fn require_user_address(&self) -> Result<String, String> {
         self.user_address
             .clone()
@@ -162,10 +144,27 @@ impl HyperliquidClient {
             "vaultAddress": null
         });
 
-        // Single unbatched action → exchange weight 1
+        // Check both rate limiters non-blocking — fail fast, no retry.
+        self.rest_limiter.acquire(1).await.map_err(|e| {
+            format!(
+                "rate_limited: rest_weight exhausted, retry_after_ms={}",
+                e.retry_after.as_millis()
+            )
+        })?;
+        self.address_limiter.acquire(1, false).await.map_err(|e| {
+            format!(
+                "rate_limited: address quota exhausted, retry_after_ms={}",
+                e.retry_after.as_millis()
+            )
+        })?;
+
         let resp = self
-            .exchange_post(payload, 1, "submit_signed_action")
-            .await?;
+            .client
+            .post(HYPERLIQUID_EXCHANGE_URL)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
 
         let body: Value = parse_response(resp).await?;
         if body["status"].as_str() == Some("err") {
@@ -726,6 +725,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         time_in_force: TimeInForce,
         cloid: Option<String>,
     ) -> Result<OrderPlacement, String> {
+        // Rate limiting is handled in submit_signed_action (non-blocking).
         let asset_idx = self.get_asset_index(&symbol).await?;
         let is_buy = matches!(side, OrderSide::Buy);
 
