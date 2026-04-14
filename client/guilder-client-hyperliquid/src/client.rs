@@ -173,6 +173,12 @@ impl HyperliquidClient {
             .await
             .map_err(|e| e.to_string())?;
 
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.map_err(|e| e.to_string())?;
+            return Err(format!("HTTP {status}: {text}"));
+        }
+
         let body: Value = parse_response(resp).await?;
         if body["status"].as_str() == Some("err") {
             return Err(body["response"]
@@ -414,7 +420,7 @@ fn keccak256(data: &[u8]) -> [u8; 32] {
     Keccak256::digest(data).into()
 }
 
-/// EIP-712 domain separator for Hyperliquid mainnet (Arbitrum, chainId=42161).
+/// EIP-712 domain separator for Hyperliquid L1 actions (chainId=1337).
 fn hyperliquid_domain_separator() -> [u8; 32] {
     let type_hash = keccak256(
         b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
@@ -422,7 +428,7 @@ fn hyperliquid_domain_separator() -> [u8; 32] {
     let name_hash = keccak256(b"Exchange");
     let version_hash = keccak256(b"1");
     let mut chain_id = [0u8; 32];
-    chain_id[28..32].copy_from_slice(&42161u32.to_be_bytes());
+    chain_id[28..32].copy_from_slice(&1337u32.to_be_bytes());
     let verifying_contract = [0u8; 32];
 
     let mut data = [0u8; 160];
@@ -432,6 +438,246 @@ fn hyperliquid_domain_separator() -> [u8; 32] {
     data[96..128].copy_from_slice(&chain_id);
     data[128..160].copy_from_slice(&verifying_contract);
     keccak256(&data)
+}
+
+/// Convert a `serde_json::Value` to msgpack bytes, preserving the JSON map key order.
+/// This avoids rmp_serde's HashMap-based serialization which reorders map keys.
+fn value_to_msgpack(val: &Value) -> Vec<u8> {
+    match val {
+        Value::Null => vec![0xc0],
+        Value::Bool(true) => vec![0xc3],
+        Value::Bool(false) => vec![0xc2],
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                if i >= 0 {
+                    if i <= 127 {
+                        vec![i as u8]
+                    } else if i <= 255 {
+                        vec![0xcc, i as u8]
+                    } else if i <= 65535 {
+                        let mut buf = vec![0xcd];
+                        buf.extend_from_slice(&(i as u16).to_be_bytes());
+                        buf
+                    } else if i <= 4294967295 {
+                        let mut buf = vec![0xce];
+                        buf.extend_from_slice(&(i as u32).to_be_bytes());
+                        buf
+                    } else {
+                        let mut buf = vec![0xcf];
+                        buf.extend_from_slice(&(i as u64).to_be_bytes());
+                        buf
+                    }
+                } else if i >= -32 {
+                    vec![0xe0 | (i as u8)]
+                } else if i >= -128 {
+                    vec![0xd0, i as i8 as u8]
+                } else if i >= -32768 {
+                    let mut buf = vec![0xd1];
+                    buf.extend_from_slice(&(i as i16).to_be_bytes());
+                    buf
+                } else if i >= -2147483648 {
+                    let mut buf = vec![0xd2];
+                    buf.extend_from_slice(&(i as i32).to_be_bytes());
+                    buf
+                } else {
+                    let mut buf = vec![0xd3];
+                    buf.extend_from_slice(&i.to_be_bytes());
+                    buf
+                }
+            } else if let Some(f) = n.as_f64() {
+                let mut buf = vec![0xcb];
+                buf.extend_from_slice(&f.to_be_bytes());
+                buf
+            } else {
+                let u = n.as_u64().unwrap();
+                if u <= 127 {
+                    vec![u as u8]
+                } else if u <= 255 {
+                    vec![0xcc, u as u8]
+                } else if u <= 65535 {
+                    let mut buf = vec![0xcd];
+                    buf.extend_from_slice(&(u as u16).to_be_bytes());
+                    buf
+                } else if u <= 4294967295 {
+                    let mut buf = vec![0xce];
+                    buf.extend_from_slice(&(u as u32).to_be_bytes());
+                    buf
+                } else {
+                    let mut buf = vec![0xcf];
+                    buf.extend_from_slice(&u.to_be_bytes());
+                    buf
+                }
+            }
+        }
+        Value::String(s) => {
+            let bytes = s.as_bytes();
+            let len = bytes.len();
+            let mut buf = Vec::new();
+            if len <= 31 {
+                buf.push(0xa0 | (len as u8));
+            } else if len <= 255 {
+                buf.push(0xd9);
+                buf.push(len as u8);
+            } else if len <= 65535 {
+                buf.push(0xda);
+                buf.extend_from_slice(&(len as u16).to_be_bytes());
+            } else {
+                buf.push(0xdb);
+                buf.extend_from_slice(&(len as u32).to_be_bytes());
+            }
+            buf.extend_from_slice(bytes);
+            buf
+        }
+        Value::Array(arr) => {
+            let len = arr.len();
+            let mut buf = Vec::new();
+            if len <= 15 {
+                buf.push(0x90 | (len as u8));
+            } else if len <= 65535 {
+                buf.push(0xdc);
+                buf.extend_from_slice(&(len as u16).to_be_bytes());
+            } else {
+                buf.push(0xdd);
+                buf.extend_from_slice(&(len as u32).to_be_bytes());
+            }
+            for item in arr {
+                buf.extend_from_slice(&value_to_msgpack(item));
+            }
+            buf
+        }
+        Value::Object(map) => {
+            let len = map.len();
+            let mut buf = Vec::new();
+            if len <= 15 {
+                buf.push(0x80 | (len as u8));
+            } else if len <= 65535 {
+                buf.push(0xde);
+                buf.extend_from_slice(&(len as u16).to_be_bytes());
+            } else {
+                buf.push(0xdf);
+                buf.extend_from_slice(&(len as u32).to_be_bytes());
+            }
+            for (key, value) in map {
+                buf.extend_from_slice(&value_to_msgpack(&Value::String(key.clone())));
+                buf.extend_from_slice(&value_to_msgpack(value));
+            }
+            buf
+        }
+    }
+}
+
+/// Convert action to msgpack bytes preserving JSON map key insertion order
+/// (matching Python's msgpack dict ordering).
+fn action_to_canonical_msgpack(action: &Value) -> Result<Vec<u8>, String> {
+    Ok(value_to_msgpack(action))
+}
+
+/// Build msgpack for a single order with Python SDK field order:
+/// a, b, c(opt), p, s, r, t
+fn build_order_msgpack(
+    asset_idx: usize,
+    is_buy: bool,
+    price: &str,
+    size: &str,
+    reduce_only: bool,
+    order_kind: &str,
+    tif: &[u8],
+    cloid: Option<&str>,
+) -> Vec<u8> {
+    let field_count = if cloid.is_some() { 7 } else { 6 };
+    let mut buf = Vec::new();
+    buf.push(0x80 | (field_count as u8)); // fixmap
+
+    // "a": asset_idx
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("a".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::Number(serde_json::Number::from(asset_idx))));
+
+    // "b": is_buy
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("b".to_string())));
+    buf.push(if is_buy { 0xc3 } else { 0xc2 });
+
+    // "p": price
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("p".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(price.to_string())));
+
+    // "s": size
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("s".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(size.to_string())));
+
+    // "r": reduce_only
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("r".to_string())));
+    buf.push(if reduce_only { 0xc3 } else { 0xc2 });
+
+    // "t": { order_kind: { "tif": tif_str } }
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("t".to_string())));
+    // Inner: fixmap(1) with order_kind key
+    buf.push(0x81);
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(order_kind.to_string())));
+    // Inner-inner: fixmap(1) with "tif" key
+    buf.push(0x81);
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("tif".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(String::from_utf8_lossy(tif).to_string())));
+
+    // "c": cloid (optional, appended at END per Python SDK)
+    if let Some(c) = cloid {
+        buf.extend_from_slice(&value_to_msgpack(&Value::String("c".to_string())));
+        buf.extend_from_slice(&value_to_msgpack(&Value::String(c.to_string())));
+    }
+
+    buf
+}
+
+/// Sign using pre-built msgpack bytes (bypassing serde_json field ordering).
+fn sign_with_msgpack(
+    msgpack: &[u8],
+    private_key: &str,
+    nonce: u64,
+    vault_address: Option<&str>,
+) -> Result<(String, String, u8), String> {
+    use k256::ecdsa::SigningKey;
+
+    let mut data = msgpack.to_vec();
+    data.extend_from_slice(&nonce.to_be_bytes());
+    match vault_address {
+        None => data.push(0u8),
+        Some(addr) => {
+            data.push(1u8);
+            let addr_bytes = hex::decode(addr.trim_start_matches("0x"))
+                .map_err(|e| format!("invalid vault address: {}", e))?;
+            data.extend_from_slice(&addr_bytes);
+        }
+    }
+
+    let connection_id = keccak256(&data);
+    let agent_type_hash = keccak256(b"Agent(string source,bytes32 connectionId)");
+    let source_hash = keccak256(b"a");
+    let mut struct_data = [0u8; 96];
+    struct_data[..32].copy_from_slice(&agent_type_hash);
+    struct_data[32..64].copy_from_slice(&source_hash);
+    struct_data[64..96].copy_from_slice(&connection_id);
+    let struct_hash = keccak256(&struct_data);
+
+    let domain_sep = hyperliquid_domain_separator();
+    let mut final_data = Vec::with_capacity(66);
+    final_data.extend_from_slice(b"\x19\x01");
+    final_data.extend_from_slice(&domain_sep);
+    final_data.extend_from_slice(&struct_hash);
+    let final_hash = keccak256(&final_data);
+
+    let key_bytes = hex::decode(private_key.trim_start_matches("0x"))
+        .map_err(|e| format!("invalid private key: {}", e))?;
+    let signing_key =
+        SigningKey::from_bytes(key_bytes.as_slice().into()).map_err(|e| e.to_string())?;
+    let (sig, recovery_id) = signing_key
+        .sign_prehash_recoverable(&final_hash)
+        .map_err(|e| e.to_string())?;
+
+    let sig_bytes = sig.to_bytes();
+    let r = format!("0x{}", hex::encode(&sig_bytes[..32]));
+    let s = format!("0x{}", hex::encode(&sig_bytes[32..64]));
+    let v = 27u8 + recovery_id.to_byte();
+
+    Ok((r, s, v))
 }
 
 /// Signs a Hyperliquid exchange action using EIP-712.
@@ -444,8 +690,9 @@ fn sign_action(
 ) -> Result<(String, String, u8), String> {
     use k256::ecdsa::SigningKey;
 
-    // Step 1: msgpack-encode the action, append nonce + vault flag
-    let msgpack_bytes = rmp_serde::to_vec(action).map_err(|e| e.to_string())?;
+    // Step 1: msgpack-encode the action preserving Python dict field order,
+    // then append nonce + vault flag.
+    let msgpack_bytes = action_to_canonical_msgpack(action)?;
     let mut data = msgpack_bytes;
     data.extend_from_slice(&nonce.to_be_bytes());
     match vault_address {
@@ -741,38 +988,123 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             TimeInForce::Ioc => "Ioc",
             TimeInForce::Fok => "Fok",
         };
+
         // Market orders are IOC limit orders at a wide price
-        let order_type_val = match order_type {
-            OrderType::Limit => serde_json::json!({"limit": {"tif": tif_str}}),
-            OrderType::Market => serde_json::json!({"limit": {"tif": "Ioc"}}),
+        let (order_kind, tif_bytes) = match order_type {
+            OrderType::Limit => ("limit", tif_str.as_bytes()),
+            OrderType::Market => ("limit", b"Ioc".as_slice()),
         };
 
-        let mut order_json = serde_json::json!({
-            "a": asset_idx,
-            "b": is_buy,
-            "p": price.to_string(),
-            "s": volume.to_string(),
-            "r": false,
-            "t": order_type_val
+        let price_str = price.to_string();
+        let size_str = volume.to_string();
+
+        let cloid_hex = cloid.as_ref().map(|c| {
+            let hash = keccak256(c.as_bytes());
+            format!("0x{}", hex::encode(&hash[..16]))
         });
-        if let Some(ref c) = cloid {
-            order_json["c"] = serde_json::json!(c);
+
+        // Build msgpack with Python SDK field order (matching the Python SDK's
+        // msgpack output). The server hashes the msgpack for signature verification,
+        // and Python preserves dict insertion order.
+        let order_msgpack = build_order_msgpack(
+            asset_idx,
+            is_buy,
+            &price_str,
+            &size_str,
+            false, // reduce_only
+            order_kind,
+            tif_bytes,
+            cloid_hex.as_deref(),
+        );
+
+        // Build the action-level msgpack: type, orders, grouping
+        let mut action_msgpack = Vec::new();
+        action_msgpack.push(0x83); // fixmap(3)
+        action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("type".to_string())));
+        action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("order".to_string())));
+        action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("orders".to_string())));
+        action_msgpack.push(0x91); // fixarray(1)
+        action_msgpack.extend_from_slice(&order_msgpack);
+        action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("grouping".to_string())));
+        action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("na".to_string())));
+
+        // Build JSON with Python SDK dict key order.
+        // Python SDK order_request_to_order_wire: a, b, p, s, r, t, c(opt at end)
+        let order_type_json = match order_type {
+            OrderType::Limit => format!(r#"{{"limit":{{"tif":"{tif_str}"}}}}"#),
+            OrderType::Market => r#"{"limit":{"tif":"Ioc"}}"#.to_string(),
+        };
+
+        let cloid_json = if let Some(ref c) = cloid_hex {
+            format!(r#","c":"{c}""#)
+        } else {
+            String::new()
+        };
+
+        let action_json_str = format!(
+            r#"{{"type":"order","orders":[{{"a":{asset_idx},"b":{is_buy},"p":"{price}","s":"{size}","r":false,"t":{order_type_json}{cloid_json}}}],"grouping":"na"}}"#,
+            price = price_str,
+            size = size_str,
+        );
+
+        // Sign using the canonical msgpack (matching Python's field order)
+        let private_key = self.require_private_key()?;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let (r, s, v) = sign_with_msgpack(&action_msgpack, private_key, nonce, None)?;
+
+        let payload_str = format!(
+            r#"{{"action":{},"nonce":{},"signature":{{"r":"{}","s":"{}","v":{}}},"vaultAddress":null}}"#,
+            action_json_str,
+            nonce,
+            r, s, v
+        );
+
+        self.rest_limiter.acquire(1).await.map_err(|e| {
+            format!(
+                "rate_limited: rest_weight exhausted, retry_after_ms={}",
+                e.retry_after.as_millis()
+            )
+        })?;
+        self.address_limiter.acquire(1, false).await.map_err(|e| {
+            format!(
+                "rate_limited: address quota exhausted, retry_after_ms={}",
+                e.retry_after.as_millis()
+            )
+        })?;
+
+        let resp = self
+            .client
+            .post(HYPERLIQUID_EXCHANGE_URL)
+            .header("Content-Type", "application/json")
+            .body(payload_str)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.map_err(|e| e.to_string())?;
+            return Err(format!("HTTP {status}: {text}"));
         }
 
-        let action = serde_json::json!({
-            "type": "order",
-            "orders": [order_json],
-            "grouping": "na"
-        });
-
-        let resp = self.submit_signed_action(action, None).await?;
-        let statuses = &resp["response"]["data"]["statuses"][0];
+        let body: Value = parse_response(resp).await?;
+        if body["status"].as_str() == Some("err") {
+            return Err(body["response"]
+                .as_str()
+                .unwrap_or("unknown error")
+                .to_string());
+        }
+        let statuses = &body["response"]["data"]["statuses"][0];
 
         let (oid, returned_cloid, timestamp_ms) = if let Some(resting) = statuses.get("resting") {
             let oid = resting["oid"]
                 .as_i64()
-                .ok_or_else(|| format!("resting status missing oid: {}", resp))?;
-            let returned_cloid = resting["cloid"].as_str().map(|s| s.to_string());
+                .ok_or_else(|| format!("resting status missing oid: {}", body))?;
+            let returned_cloid = resting["cloid"].as_str().map(|s: &str| s.to_string());
             // resting doesn't include a timestamp
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -782,7 +1114,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         } else if let Some(filled) = statuses.get("filled") {
             let oid = filled["oid"]
                 .as_i64()
-                .ok_or_else(|| format!("filled status missing oid: {}", resp))?;
+                .ok_or_else(|| format!("filled status missing oid: {}", body))?;
             // filled doesn't include cloid
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -795,7 +1127,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
                 .unwrap_or("order rejected with unknown error")
                 .to_string());
         } else {
-            return Err(format!("unexpected order status: {}", resp));
+            return Err(format!("unexpected order status: {}", body));
         };
 
         Ok(OrderPlacement {

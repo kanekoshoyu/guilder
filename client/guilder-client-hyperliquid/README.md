@@ -47,9 +47,22 @@ engine.track(vec!["BTC".into(), "ETH".into()]).await?;
 
 ## Features
 
+- **EIP-712 signing** — full L1 action signing with msgpack encoding matching the official Python SDK. Order wire format follows `order_request_to_order_wire` field order (`a, b, p, s, r, t, c`).
 - **Auto-reconnecting WebSocket streams** — `subscribe_*` methods return logically persistent streams that auto-reconnect on connection loss (5s delay). Consumers see transient `Err` items but the stream never terminates due to a dropped connection.
 - **WebSocket multiplexing** — multiple subscriptions share a single connection where possible.
 - **Configurable rate limiting** — respects Hyperliquid's weight-based rate limits with configurable budgets.
+
+## Testing
+
+Integration tests are available in `tests/order.rs`. They are gated on environment variables — set credentials to run, skip otherwise:
+
+```bash
+# Run tests (skips if no credentials)
+cargo test -p guilder-client-hyperliquid --test order
+
+# Run with a test wallet
+HYPERLIQUID_WALLET_ADDRESS=0x... HYPERLIQUID_WALLET_KEY=0x... cargo test -p guilder-client-hyperliquid --test order -- --nocapture
+```
 
 ## Rate limits
 
