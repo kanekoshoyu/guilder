@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.11 — 2026-04-14
+
+- Fix order submission 422: add `expiresAfter` field to JSON payload
+  - Python SDK always includes `"expiresAfter": null` in `_post_action`; omitting it caused server-side deserialization failure
+  - Fixed in both `place_order` (direct POST) and `submit_signed_action` (cancel, modify, etc.)
+
 ## 0.4.10 — 2026-04-14
 
 - Fix EIP-712 signing for order placement and cancel: msgpack field order now matches Python SDK exactly

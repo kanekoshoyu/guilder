@@ -148,7 +148,8 @@ impl HyperliquidClient {
             "action": action,
             "nonce": nonce,
             "signature": {"r": r, "s": s, "v": v},
-            "vaultAddress": null
+            "vaultAddress": null,
+            "expiresAfter": null
         });
 
         // Check both rate limiters non-blocking — fail fast, no retry.
@@ -1057,7 +1058,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         let (r, s, v) = sign_with_msgpack(&action_msgpack, private_key, nonce, None)?;
 
         let payload_str = format!(
-            r#"{{"action":{},"nonce":{},"signature":{{"r":"{}","s":"{}","v":{}}},"vaultAddress":null}}"#,
+            r#"{{"action":{},"nonce":{},"signature":{{"r":"{}","s":"{}","v":{}}},"vaultAddress":null,"expiresAfter":null}}"#,
             action_json_str,
             nonce,
             r, s, v
