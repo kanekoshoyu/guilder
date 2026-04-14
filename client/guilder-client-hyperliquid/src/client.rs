@@ -1980,3 +1980,303 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
         }))
     }
 }
+
+#[cfg(test)]
+mod msgpack_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_msgpack_null() {
+        let result = value_to_msgpack(&Value::Null);
+        assert_eq!(result, vec![0xc0]);
+    }
+
+    #[test]
+    fn test_msgpack_bool() {
+        assert_eq!(value_to_msgpack(&Value::Bool(true)), vec![0xc3]);
+        assert_eq!(value_to_msgpack(&Value::Bool(false)), vec![0xc2]);
+    }
+
+    #[test]
+    fn test_msgpack_positive_fixint() {
+        // 0–127: positive fixint
+        assert_eq!(value_to_msgpack(&json!(0)), vec![0x00]);
+        assert_eq!(value_to_msgpack(&json!(1)), vec![0x01]);
+        assert_eq!(value_to_msgpack(&json!(127)), vec![0x7f]);
+    }
+
+    #[test]
+    fn test_msgpack_uint8() {
+        // 128–255: uint8
+        assert_eq!(value_to_msgpack(&json!(128)), vec![0xcc, 0x80]);
+        assert_eq!(value_to_msgpack(&json!(255)), vec![0xcc, 0xff]);
+    }
+
+    #[test]
+    fn test_msgpack_uint16() {
+        // 256–65535: uint16
+        assert_eq!(value_to_msgpack(&json!(256)), vec![0xcd, 0x01, 0x00]);
+        assert_eq!(value_to_msgpack(&json!(65535)), vec![0xcd, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn test_msgpack_uint32() {
+        // 65536–4294967295: uint32
+        assert_eq!(
+            value_to_msgpack(&json!(65536)),
+            vec![0xce, 0x00, 0x01, 0x00, 0x00]
+        );
+        assert_eq!(
+            value_to_msgpack(&json!(4294967295u64)),
+            vec![0xce, 0xff, 0xff, 0xff, 0xff]
+        );
+    }
+
+    #[test]
+    fn test_msgpack_uint64() {
+        // >4294967295: uint64
+        let big: u64 = 4294967296;
+        assert_eq!(
+            value_to_msgpack(&json!(big)),
+            vec![0xcf, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn test_msgpack_negative_fixint() {
+        // -1 to -32: negative fixint
+        assert_eq!(value_to_msgpack(&json!(-1)), vec![0xff]);
+        assert_eq!(value_to_msgpack(&json!(-32)), vec![0xe0]);
+    }
+
+    #[test]
+    fn test_msgpack_int8() {
+        // -33 to -128: int8
+        assert_eq!(value_to_msgpack(&json!(-33)), vec![0xd0, 0xdf]);
+        assert_eq!(value_to_msgpack(&json!(-128)), vec![0xd0, 0x80]);
+    }
+
+    #[test]
+    fn test_msgpack_int16() {
+        // -129 to -32768: int16
+        assert_eq!(value_to_msgpack(&json!(-129)), vec![0xd1, 0xff, 0x7f]);
+        assert_eq!(value_to_msgpack(&json!(-32768)), vec![0xd1, 0x80, 0x00]);
+    }
+
+    #[test]
+    fn test_msgpack_int32() {
+        // -32769 to -2147483648: int32
+        assert_eq!(
+            value_to_msgpack(&json!(-32769)),
+            vec![0xd2, 0xff, 0xff, 0x7f, 0xff]
+        );
+        assert_eq!(
+            value_to_msgpack(&json!(-2147483648i64)),
+            vec![0xd2, 0x80, 0x00, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn test_msgpack_int64() {
+        let val: i64 = -2147483649;
+        let result = value_to_msgpack(&json!(val));
+        assert_eq!(result[0], 0xd3); // int64 marker
+        assert_eq!(result.len(), 9);
+    }
+
+    #[test]
+    fn test_msgpack_float() {
+        let result = value_to_msgpack(&json!(3.14));
+        assert_eq!(result[0], 0xcb); // float64 marker
+        assert_eq!(result.len(), 9);
+    }
+
+    #[test]
+    fn test_msgpack_fixstr() {
+        // 0–31 bytes: fixstr
+        assert_eq!(value_to_msgpack(&json!("")), vec![0xa0]);
+        assert_eq!(
+            value_to_msgpack(&json!("hello")),
+            {
+                let mut expected = vec![0xa5];
+                expected.extend_from_slice(b"hello");
+                expected
+            }
+        );
+        let s = "a".repeat(31);
+        let result = value_to_msgpack(&json!(s));
+        assert_eq!(result[0], 0xbf); // 0xa0 | 31
+        assert_eq!(result.len(), 32);
+    }
+
+    #[test]
+    fn test_msgpack_str8() {
+        let s = "a".repeat(32);
+        let result = value_to_msgpack(&json!(s));
+        assert_eq!(result[0], 0xd9); // str8 marker
+        assert_eq!(result[1], 32);
+        assert_eq!(result.len(), 34);
+    }
+
+    #[test]
+    fn test_msgpack_fixarray() {
+        // 0–15 elements: fixarray
+        assert_eq!(value_to_msgpack(&json!([])), vec![0x90]);
+        let result = value_to_msgpack(&json!([1, 2, 3]));
+        assert_eq!(result[0], 0x93);
+        assert_eq!(result, vec![0x93, 0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_msgpack_fixmap() {
+        // 0–15 entries: fixmap
+        assert_eq!(value_to_msgpack(&json!({})), vec![0x80]);
+        let result = value_to_msgpack(&json!({"a": 1}));
+        assert_eq!(result[0], 0x81); // fixmap(1)
+        assert_eq!(result, {
+            let mut expected = vec![0x81];
+            expected.extend_from_slice(&value_to_msgpack(&json!("a")));
+            expected.extend_from_slice(&value_to_msgpack(&json!(1)));
+            expected
+        });
+    }
+
+    #[test]
+    fn test_msgmap_preserves_insertion_order() {
+        // Verify keys are serialized in JSON insertion order, not sorted
+        let val = json!({
+            "z": 1,
+            "a": 2,
+            "m": 3
+        });
+        let result = value_to_msgpack(&val);
+        // fixmap(3)
+        assert_eq!(result[0], 0x83);
+        // First key should be "z" (insertion order), not "a" (sorted)
+        assert_eq!(result[1], 0xa1); // fixstr(1)
+        assert_eq!(result[2], b'z');
+    }
+
+    #[test]
+    fn test_msgpack_mixed_array() {
+        let val = json!([null, true, false, 42, "hi", [1, 2]]);
+        let result = value_to_msgpack(&val);
+        assert_eq!(result[0], 0x96); // fixarray(6)
+        assert_eq!(result[1], 0xc0); // null
+        assert_eq!(result[2], 0xc3); // true
+        assert_eq!(result[3], 0xc2); // false
+        assert_eq!(result[4], 0x2a); // 42
+        // "hi" = fixstr(2) + "hi"
+        assert_eq!(result[5], 0xa2);
+        assert_eq!(result[6], b'h');
+        assert_eq!(result[7], b'i');
+    }
+
+    #[test]
+    fn test_build_order_msgpack_without_cloid() {
+        let result = build_order_msgpack(
+            0,       // asset index
+            true,    // is_buy
+            "1000",  // price
+            "0.1",   // size
+            false,   // reduce_only
+            "limit", // order_kind
+            b"gtc",  // tif
+            None,    // cloid
+        );
+        // fixmap(6)
+        assert_eq!(result[0], 0x86);
+    }
+
+    #[test]
+    fn test_build_order_msgpack_with_cloid() {
+        let result = build_order_msgpack(
+            0,       // asset index
+            true,    // is_buy
+            "1000",  // price
+            "0.1",   // size
+            false,   // reduce_only
+            "limit", // order_kind
+            b"gtc",  // tif
+            Some("my-cloid"), // cloid
+        );
+        // fixmap(7)
+        assert_eq!(result[0], 0x87);
+    }
+
+    #[test]
+    fn test_action_to_canonical_msgpack() {
+        let action = json!({
+            "type": "order",
+            "orders": [{"a": 0, "b": true, "p": "1000", "s": "0.1", "r": false, "t": {"limit": {"tif": "gtc"}}}],
+            "grouping": "na"
+        });
+        let result = action_to_canonical_msgpack(&action).unwrap();
+        // fixmap(3)
+        assert_eq!(result[0], 0x83);
+    }
+
+    #[test]
+    fn test_msgpack_matches_rmp_serde_for_simple_values() {
+        // Verify our encoding matches rmp_serde for simple scalar values
+        use rmp_serde::to_vec;
+
+        for val in [json!(0), json!(127), json!(255), json!(1000), json!(-1), json!(-32), json!(-128)] {
+            let ours = value_to_msgpack(&val);
+            let theirs = to_vec(&val).unwrap();
+            assert_eq!(
+                ours, theirs,
+                "mismatch for {}: ours={:?}, rmp={:?}",
+                val, ours, theirs
+            );
+        }
+    }
+
+    #[test]
+    fn test_msgpack_string_encoding() {
+        use rmp_serde::to_vec;
+        for val in [json!(""), json!("a"), json!("hello world"), json!("BTC-USD")] {
+            let ours = value_to_msgpack(&val);
+            let theirs = to_vec(&val).unwrap();
+            assert_eq!(
+                ours, theirs,
+                "mismatch for {}: ours={:?}, rmp={:?}",
+                val, ours, theirs
+            );
+        }
+    }
+
+    #[test]
+    fn test_msgpack_bool_encoding() {
+        use rmp_serde::to_vec;
+        let theirs = to_vec(&json!(true)).unwrap();
+        assert_eq!(value_to_msgpack(&json!(true)), theirs);
+        let theirs = to_vec(&json!(false)).unwrap();
+        assert_eq!(value_to_msgpack(&json!(false)), theirs);
+    }
+
+    #[test]
+    fn test_msgpack_null_encoding() {
+        use rmp_serde::to_vec;
+        let theirs = to_vec(&Value::Null).unwrap();
+        assert_eq!(value_to_msgpack(&Value::Null), theirs);
+    }
+
+    #[test]
+    fn test_msgpack_nested_object() {
+        let val = json!({
+            "outer": {
+                "inner": 42
+            }
+        });
+        let result = value_to_msgpack(&val);
+        assert_eq!(result[0], 0x81); // fixmap(1)
+    }
+
+    #[test]
+    fn test_msgpack_empty_containers() {
+        assert_eq!(value_to_msgpack(&json!([])), vec![0x90]);
+        assert_eq!(value_to_msgpack(&json!({})), vec![0x80]);
+    }
+}

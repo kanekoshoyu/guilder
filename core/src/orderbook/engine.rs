@@ -1,5 +1,6 @@
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
+use rust_decimal::Decimal;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio::time::Instant;
@@ -209,7 +210,7 @@ where
 
     /// Returns the top `depth` levels per side for a symbol.
     /// If `depth` is `None`, returns all levels.
-    pub fn snapshot(&self, symbol: &str, depth: Option<usize>) -> Option<Vec<(Side, f64, f64)>> {
+    pub fn snapshot(&self, symbol: &str, depth: Option<usize>) -> Option<Vec<(Side, Decimal, Decimal)>> {
         let book = self.books.get(symbol)?;
         Some(book.snapshot(depth))
     }
@@ -228,7 +229,7 @@ where
     }
 
     /// Quote-currency liquidity within a slippage boundary on one side.
-    pub fn liquidity(&self, symbol: &str, side: Side, slippage_pct: f64) -> Option<f64> {
+    pub fn liquidity(&self, symbol: &str, side: Side, slippage_pct: f64) -> Option<Decimal> {
         let book = self.books.get(symbol)?;
         book.liquidity(side, slippage_pct)
     }

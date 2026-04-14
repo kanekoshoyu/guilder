@@ -23,8 +23,6 @@ serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = "0.12.7"
 # concurrent hashmap
 dashmap = "6.0.1"
-# ordered f64
-ordered-float = "4.2.2"
 # async stream trait (no runtime, tokio-compatible)
 futures-core = "0.3"
 # async runtime

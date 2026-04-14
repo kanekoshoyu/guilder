@@ -1,6 +1,6 @@
 [package]
 name = "guilder-core"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 description = "reusable trading components (orderbook, currency pair, engine) for guilder"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -13,8 +13,7 @@ account = ["rust_decimal", "chrono", "uuid", "serde", "tokio", "tracing", "arc-s
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = "0.1.16"
-ordered-float.workspace = true
+guilder-abstraction = "0.1.17"
 # engine feature deps
 dashmap = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
