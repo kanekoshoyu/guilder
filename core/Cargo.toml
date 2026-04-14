@@ -1,6 +1,6 @@
 [package]
 name = "guilder-core"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "reusable trading components (orderbook, currency pair, engine) for guilder"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
