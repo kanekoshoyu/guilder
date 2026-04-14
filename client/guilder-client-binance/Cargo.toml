@@ -1,6 +1,6 @@
 [package]
 name = "guilder-client-binance"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Binance client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
