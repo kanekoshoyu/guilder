@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use rust_decimal::Decimal;
 use std::pin::Pin;
 use futures_core::Stream;
@@ -278,6 +279,10 @@ pub trait GetMarketData {
 	async fn get_asset_context(&self, symbol: String) -> Result<AssetContext, String>;
 	/// get all asset context snapshots in one call (prefer over repeated get_asset_context)
 	async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String>;
+	/// get the number of decimal places for order size for a symbol (static metadata)
+	async fn get_sz_decimals(&self, symbol: String) -> Result<i32, String>;
+	/// get sz_decimals for all symbols in one call (prefer over repeated get_sz_decimals)
+	async fn get_all_sz_decimals(&self) -> Result<HashMap<String, i32>, String>;
 	/// get predicted funding rates for all symbols across all venues
 	async fn get_predicted_fundings(&self) -> Result<Vec<PredictedFunding>, String>;
 	/// get full L2 orderbook snapshot for a symbol (for initialization)

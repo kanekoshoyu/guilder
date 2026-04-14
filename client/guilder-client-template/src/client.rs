@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -46,6 +46,14 @@ impl guilder_abstraction::GetMarketData for ExchangeClient {
     }
 
     async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String> {
+        Err("not implemented".to_string())
+    }
+
+    async fn get_sz_decimals(&self, symbol: String) -> Result<i32, String> {
+        Err("not implemented".to_string())
+    }
+
+    async fn get_all_sz_decimals(&self) -> Result<HashMap<String, i32>, String> {
         Err("not implemented".to_string())
     }
 

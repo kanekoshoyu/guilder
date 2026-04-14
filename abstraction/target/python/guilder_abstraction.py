@@ -235,6 +235,16 @@ class GetMarketData(ABC):
 		pass
 
 	@abstractmethod
+	async def get_sz_decimals(self, symbol: str) -> Result<i32, String>:
+		"""get the number of decimal places for order size for a symbol (static metadata)"""
+		pass
+
+	@abstractmethod
+	async def get_all_sz_decimals(self) -> Result<HashMap<String, i32>, String>:
+		"""get sz_decimals for all symbols in one call (prefer over repeated get_sz_decimals)"""
+		pass
+
+	@abstractmethod
 	async def get_predicted_fundings(self) -> Result<Vec<PredictedFunding>, String>:
 		"""get predicted funding rates for all symbols across all venues"""
 		pass
