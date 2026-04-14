@@ -201,6 +201,8 @@ struct MetaResponse {
 #[derive(Deserialize)]
 struct AssetInfo {
     name: String,
+    #[serde(rename = "szDecimals")]
+    sz_decimals: i32,
 }
 
 type MetaAndAssetCtxsResponse = (MetaResponse, Vec<RestAssetCtx>);
@@ -827,6 +829,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
             oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
             premium: ctx.premium.as_deref().and_then(parse_decimal),
             prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+            sz_decimals: meta.universe.get(idx).map(|a| a.sz_decimals).unwrap_or(0),
         })
     }
 
@@ -868,6 +871,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
                 oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
                 premium: ctx.premium.as_deref().and_then(parse_decimal),
                 prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+                sz_decimals: asset.sz_decimals,
             });
         }
         Ok(result)
@@ -1348,6 +1352,8 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     oracle_price: ctx.oracle_px.as_deref().and_then(parse_decimal),
                     premium: ctx.premium.as_deref().and_then(parse_decimal),
                     prev_day_price: ctx.prev_day_px.as_deref().and_then(parse_decimal),
+                    // szDecimals is static metadata, not streamed via activeAssetCtx WS
+                    sz_decimals: 0,
                 });
             }
         })

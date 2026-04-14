@@ -73,7 +73,7 @@ class Liquidation:
 
 class AssetContext:
 	"""snapshot of market metrics"""
-	def __init__(self, symbol: str, open_interest: str, funding_rate: str, mark_price: str, day_volume: str, mid_price: Option<Decimal>, oracle_price: Option<Decimal>, premium: Option<Decimal>, prev_day_price: Option<Decimal>):
+	def __init__(self, symbol: str, open_interest: str, funding_rate: str, mark_price: str, day_volume: str, mid_price: Option<Decimal>, oracle_price: Option<Decimal>, premium: Option<Decimal>, prev_day_price: Option<Decimal>, sz_decimals: int):
 		self.symbol = symbol
 		self.open_interest = open_interest
 		self.funding_rate = funding_rate
@@ -83,6 +83,7 @@ class AssetContext:
 		self.oracle_price = oracle_price
 		self.premium = premium
 		self.prev_day_price = prev_day_price
+		self.sz_decimals = sz_decimals
 
 class PredictedFunding:
 	"""predicted funding rate for a symbol at a venue"""

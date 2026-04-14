@@ -130,6 +130,7 @@ pub struct AssetContext {
 	pub oracle_price: Option<Decimal>,
 	pub premium: Option<Decimal>,
 	pub prev_day_price: Option<Decimal>,
+	pub sz_decimals: i32,
 }
 
 /// predicted funding rate for a symbol at a venue

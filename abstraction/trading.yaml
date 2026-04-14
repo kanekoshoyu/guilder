@@ -336,6 +336,9 @@ structs:
         type: Option<Decimal>
       - name: prev_day_price
         type: Option<Decimal>
+      - name: sz_decimals
+        type: i32
+        description: number of decimal places for order size (e.g. Hyperliquid szDecimals)
 
   - name: PredictedFunding
     description: predicted funding rate for a symbol at a venue
