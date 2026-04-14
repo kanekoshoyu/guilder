@@ -2,7 +2,7 @@ use futures_util::stream;
 use guilder_abstraction::{
     self, AssetContext, Balance, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation,
     OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position, PredictedFunding,
-    TimeInForce, UserFill, Withdrawal,
+    TimeInForce, UserFill, UserRateLimit, Withdrawal,
 };
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -153,6 +153,10 @@ impl guilder_abstraction::GetAccountSnapshot for BinanceClient {
     }
 
     async fn get_collateral_balance(&self, symbol: String) -> Result<Balance, String> {
+        unimplemented!()
+    }
+
+    async fn get_user_rate_limit(&self) -> Result<UserRateLimit, String> {
         unimplemented!()
     }
 }
