@@ -346,6 +346,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
             ValueType::List(inner) | ValueType::Stream(inner) | ValueType::Iter(inner) => {
                 uses_map(inner)
             }
+            ValueType::CustomType(s) => s.contains("HashMap"),
             _ => false,
         }
     }

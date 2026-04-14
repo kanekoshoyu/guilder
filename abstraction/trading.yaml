@@ -44,6 +44,17 @@ traits:
         description: get all asset context snapshots in one call (prefer over repeated get_asset_context)
         return_type: Result<Vec<AssetContext>, String>
 
+      - name: get_sz_decimals
+        description: get the number of decimal places for order size for a symbol (static metadata)
+        return_type: Result<i32, String>
+        args:
+          - name: symbol
+            type: String
+
+      - name: get_all_sz_decimals
+        description: get sz_decimals for all symbols in one call (prefer over repeated get_sz_decimals)
+        return_type: Result<HashMap<String, i32>, String>
+
       - name: get_predicted_fundings
         description: get predicted funding rates for all symbols across all venues
         return_type: Result<Vec<PredictedFunding>, String>

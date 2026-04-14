@@ -877,6 +877,34 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
         Ok(result)
     }
 
+    /// Returns the number of decimal places for order size for a symbol.
+    async fn get_sz_decimals(&self, symbol: String) -> Result<i32, String> {
+        let all = self.get_all_sz_decimals().await?;
+        all.get(&symbol)
+            .copied()
+            .ok_or_else(|| format!("symbol {} not found", symbol))
+    }
+
+    /// Returns sz_decimals for all symbols from the meta universe.
+    async fn get_all_sz_decimals(&self) -> Result<HashMap<String, i32>, String> {
+        // metaAndAssetCtxs → weight 20
+        let resp = self
+            .info_post(
+                serde_json::json!({"type": "metaAndAssetCtxs"}),
+                20,
+                "get_all_sz_decimals",
+            )
+            .await?;
+        let (meta, _) = parse_response::<Option<MetaAndAssetCtxsResponse>>(resp)
+            .await?
+            .ok_or_else(|| "metaAndAssetCtxs returned null".to_string())?;
+        Ok(meta
+            .universe
+            .into_iter()
+            .map(|a| (a.name, a.sz_decimals))
+            .collect())
+    }
+
     /// Returns a full L2 orderbook snapshot for `symbol` from the l2Book REST endpoint.
     /// Levels are returned as individual `L2Update` items; all share the same `sequence` (timestamp).
     async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {

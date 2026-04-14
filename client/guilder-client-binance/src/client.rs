@@ -6,6 +6,7 @@ use guilder_abstraction::{
 };
 use reqwest::Client;
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 
 #[allow(dead_code)]
 pub struct BinanceClient {
@@ -58,6 +59,14 @@ impl guilder_abstraction::GetMarketData for BinanceClient {
     }
 
     async fn get_all_asset_contexts(&self) -> Result<Vec<AssetContext>, String> {
+        unimplemented!()
+    }
+
+    async fn get_sz_decimals(&self, symbol: String) -> Result<i32, String> {
+        unimplemented!()
+    }
+
+    async fn get_all_sz_decimals(&self) -> Result<HashMap<String, i32>, String> {
         unimplemented!()
     }
 
