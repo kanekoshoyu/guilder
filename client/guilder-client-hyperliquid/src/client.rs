@@ -1394,7 +1394,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
             "subscription": {"type": "userEvents", "user": user.clone()}
         });
         let key = crate::ws::SubKey {
-            channel: "userEvents".to_string(),
+            channel: "user".to_string(),
             routing_key: user,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
@@ -1404,7 +1404,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                     let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                         return None;
                     };
-                    if env.channel != "userEvents" {
+                    if env.channel != "user" {
                         return None;
                     }
                     let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
@@ -1693,7 +1693,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             "subscription": {"type": "userEvents", "user": addr_str.clone()}
         });
         let key = crate::ws::SubKey {
-            channel: "userEvents".to_string(),
+            channel: "user".to_string(),
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
@@ -1703,7 +1703,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                     let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                         return None;
                     };
-                    if env.channel != "userEvents" {
+                    if env.channel != "user" {
                         return None;
                     }
                     let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
@@ -1817,7 +1817,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             "subscription": {"type": "userEvents", "user": addr_str.clone()}
         });
         let key = crate::ws::SubKey {
-            channel: "userEvents".to_string(),
+            channel: "user".to_string(),
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
@@ -1827,7 +1827,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                     let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                         return None;
                     };
-                    if env.channel != "userEvents" {
+                    if env.channel != "user" {
                         return None;
                     }
                     let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
@@ -1973,7 +1973,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             "subscription": {"type": "userEvents", "user": addr_str.clone()}
         });
         let key = crate::ws::SubKey {
-            channel: "userEvents".to_string(),
+            channel: "user".to_string(),
             routing_key: addr_str,
         };
         let raw_stream = self.ws_mux.subscribe(key, sub);
@@ -1981,7 +1981,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) else {
                 return None;
             };
-            if env.channel != "userEvents" {
+            if env.channel != "user" {
                 return None;
             }
             let Ok(event) = serde_json::from_value::<WsUserEvent>(env.data) else {
