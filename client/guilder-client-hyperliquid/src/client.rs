@@ -576,7 +576,7 @@ fn action_to_canonical_msgpack(action: &Value) -> Result<Vec<u8>, String> {
 }
 
 /// Build msgpack for a single order with Python SDK field order:
-/// a, b, c(opt), p, s, r, t
+/// a, b, p, s, r, t, c(opt)
 fn build_order_msgpack(
     asset_idx: usize,
     is_buy: bool,
@@ -603,7 +603,7 @@ fn build_order_msgpack(
     buf.extend_from_slice(&value_to_msgpack(&Value::String("p".to_string())));
     buf.extend_from_slice(&value_to_msgpack(&Value::String(price.to_string())));
 
-    // "s": size
+    // "s": size (Python SDK puts s before r)
     buf.extend_from_slice(&value_to_msgpack(&Value::String("s".to_string())));
     buf.extend_from_slice(&value_to_msgpack(&Value::String(size.to_string())));
 
@@ -1050,7 +1050,8 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             cloid_hex.as_deref(),
         );
 
-        // Build the action-level msgpack: type, orders, grouping
+        // Build the action-level msgpack with Python SDK field order (insertion order):
+        // type → orders → grouping
         let mut action_msgpack = Vec::new();
         action_msgpack.push(0x83); // fixmap(3)
         action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("type".to_string())));
@@ -1061,8 +1062,8 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("grouping".to_string())));
         action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("na".to_string())));
 
-        // Build JSON with Python SDK dict key order.
-        // Python SDK order_request_to_order_wire: a, b, p, s, r, t, c(opt at end)
+        // Build JSON with official SDK field order (alphabetical):
+        // grouping → orders → type
         let order_type_json = match order_type {
             OrderType::Limit => format!(r#"{{"limit":{{"tif":"{tif_str}"}}}}"#),
             OrderType::Market => r#"{"limit":{"tif":"Ioc"}}"#.to_string(),
