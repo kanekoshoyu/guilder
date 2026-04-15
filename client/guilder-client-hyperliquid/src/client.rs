@@ -1028,8 +1028,8 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             OrderType::Market => ("limit", b"Ioc".as_slice()),
         };
 
-        let price_str = price.to_string();
-        let size_str = volume.to_string();
+        let price_str = price.normalize().to_string();
+        let size_str = volume.normalize().to_string();
 
         let cloid_hex = cloid.as_ref().map(|c| {
             let hash = keccak256(c.as_bytes());
