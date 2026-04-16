@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -70,7 +70,7 @@ impl guilder_abstraction::GetMarketData for ExchangeClient {
 #[allow(unused_variables)]
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::ManageOrder for ExchangeClient {
-    async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce, cloid: Option<String>) -> Result<OrderPlacement, String> {
+    async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce, trigger_price: Option<Decimal>, reduce_only: bool, cloid: Option<String>) -> Result<OrderPlacement, String> {
         Err("not implemented".to_string())
     }
 

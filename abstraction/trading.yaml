@@ -85,6 +85,10 @@ traits:
             type: OrderType
           - name: time_in_force
             type: TimeInForce
+          - name: trigger_price
+            type: Option<Decimal>
+          - name: reduce_only
+            type: bool
           - name: cloid
             type: Option<String>
         return_type: Result<OrderPlacement, String>
@@ -264,9 +268,13 @@ enums:
     description: order execution type
     values:
       - name: Market
-        description: execute immediately
+        description: execute immediately at market price
       - name: Limit
-        description: execute at specified price
+        description: execute at specified price or better
+      - name: TakeProfit
+        description: trigger order that fires as market/limit when price reaches take-profit level
+      - name: StopLoss
+        description: trigger order that fires as market/limit when price reaches stop-loss level
 
   - name: TimeInForce
     description: how long an order remains active
@@ -277,6 +285,8 @@ enums:
         description: immediate or cancel
       - name: Fok
         description: fill or kill
+      - name: Alo
+        description: add liquidity only (post-only, never taker)
 
   - name: VolumeDenomination
     description: which currency the volume is expressed in
@@ -406,6 +416,12 @@ structs:
         type: Decimal
       - name: filled_quantity
         type: Decimal
+      - name: order_type
+        type: Option<OrderType>
+      - name: trigger_price
+        type: Option<Decimal>
+      - name: reduce_only
+        type: bool
 
   - name: OrderPlacement
     description: order placement response
@@ -424,6 +440,12 @@ structs:
         type: i64
       - name: cloid
         type: Option<String>
+      - name: order_type
+        type: OrderType
+      - name: trigger_price
+        type: Option<Decimal>
+      - name: reduce_only
+        type: bool
 
   - name: UserFill
     description: execution of the user's own order

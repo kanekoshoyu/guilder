@@ -1,6 +1,6 @@
 [package]
 name = "guilder-abstraction"
-version = "0.1.19"
+version = "0.1.20"
 edition = "2021"
 description = "multi-exchange crypto trading trait"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -10,3 +10,4 @@ license = "MIT"
 [dependencies]
 futures-core = { workspace = true }
 rust_decimal = "1"
+serde = { version = "1", features = ["derive"] }

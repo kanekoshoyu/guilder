@@ -631,6 +631,65 @@ fn build_order_msgpack(
     buf
 }
 
+/// Build msgpack for a trigger order (take profit / stop loss) with Python SDK field order.
+/// Trigger orders use: t = { "trigger": { "isMarket": bool, "triggerPx": str, "tpsl": "tp"|"sl" } }
+fn build_trigger_order_msgpack(
+    asset_idx: usize,
+    is_buy: bool,
+    price: &str,
+    size: &str,
+    reduce_only: bool,
+    trigger_px: &str,
+    is_market: bool,
+    tpsl: &str,
+    cloid: Option<&str>,
+) -> Vec<u8> {
+    let field_count = if cloid.is_some() { 7 } else { 6 };
+    let mut buf = Vec::new();
+    buf.push(0x80 | (field_count as u8)); // fixmap
+
+    // "a": asset_idx
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("a".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::Number(serde_json::Number::from(asset_idx))));
+
+    // "b": is_buy
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("b".to_string())));
+    buf.push(if is_buy { 0xc3 } else { 0xc2 });
+
+    // "p": price (use trigger_px as price for resting, or "0" for market-on-trigger)
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("p".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(price.to_string())));
+
+    // "s": size
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("s".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(size.to_string())));
+
+    // "r": reduce_only
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("r".to_string())));
+    buf.push(if reduce_only { 0xc3 } else { 0xc2 });
+
+    // "t": { "trigger": { "isMarket": bool, "triggerPx": str, "tpsl": str } }
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("t".to_string())));
+    buf.push(0x81); // fixmap(1): "trigger"
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("trigger".to_string())));
+    // trigger object: fixmap(3)
+    buf.push(0x83);
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("isMarket".to_string())));
+    buf.push(if is_market { 0xc3 } else { 0xc2 });
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("triggerPx".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(trigger_px.to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String("tpsl".to_string())));
+    buf.extend_from_slice(&value_to_msgpack(&Value::String(tpsl.to_string())));
+
+    // "c": cloid (optional, appended at END)
+    if let Some(c) = cloid {
+        buf.extend_from_slice(&value_to_msgpack(&Value::String("c".to_string())));
+        buf.extend_from_slice(&value_to_msgpack(&Value::String(c.to_string())));
+    }
+
+    buf
+}
+
 /// Sign using pre-built msgpack bytes (bypassing serde_json field ordering).
 fn sign_with_msgpack(
     msgpack: &[u8],
@@ -1003,6 +1062,10 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
     /// If `cloid` is provided, Hyperliquid attaches it to the order lifecycle — fills and order
     /// updates will carry the same cloid back, enabling end-to-end intent tracing without a
     /// separate order_id mapping.
+    ///
+    /// Trigger orders (`TakeProfit` / `StopLoss`) require `trigger_price` to be set. The order
+    /// activates when the mark price reaches `triggerPx`, then executes as a market or limit
+    /// order depending on `time_in_force` (`Ioc` = market, `Gtc` = limit).
     async fn place_order(
         &self,
         symbol: String,
@@ -1011,6 +1074,8 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         volume: Decimal,
         order_type: OrderType,
         time_in_force: TimeInForce,
+        trigger_price: Option<Decimal>,
+        reduce_only: bool,
         cloid: Option<String>,
     ) -> Result<OrderPlacement, String> {
         // Rate limiting is handled in submit_signed_action (non-blocking).
@@ -1021,32 +1086,96 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             TimeInForce::Gtc => "Gtc",
             TimeInForce::Ioc => "Ioc",
             TimeInForce::Fok => "Fok",
+            TimeInForce::Alo => "Alo",
         };
-
-        // Market orders are IOC limit orders at a wide price
-        let (order_kind, tif_bytes) = match order_type {
-            OrderType::Limit => ("limit", tif_str.as_bytes()),
-            OrderType::Market => ("limit", b"Ioc".as_slice()),
-        };
-
-        let price_str = price.normalize().to_string();
-        let size_str = volume.normalize().to_string();
 
         let cloid_hex = cloid.clone();
 
-        // Build msgpack with Python SDK field order (matching the Python SDK's
-        // msgpack output). The server hashes the msgpack for signature verification,
-        // and Python preserves dict insertion order.
-        let order_msgpack = build_order_msgpack(
-            asset_idx,
-            is_buy,
-            &price_str,
-            &size_str,
-            false, // reduce_only
-            order_kind,
-            tif_bytes,
-            cloid_hex.as_deref(),
-        );
+        // Determine if this is a trigger order
+        let is_trigger = matches!(order_type, OrderType::TakeProfit | OrderType::StopLoss);
+
+        let (order_msgpack, order_type_json) = if is_trigger {
+            // --- Trigger order ---
+            let trigger_px = trigger_price
+                .ok_or_else(|| {
+                    format!("{:?} order requires trigger_price to be set", order_type)
+                })?
+                .normalize()
+                .to_string();
+
+            let tpsl = match order_type {
+                OrderType::TakeProfit => "tp",
+                OrderType::StopLoss => "sl",
+                _ => unreachable!(),
+            };
+
+            // TimeInForce determines market vs limit on trigger:
+            // Ioc = market execution (isMarket: true), Gtc/Alo/Fok = limit (isMarket: false)
+            let is_market = matches!(time_in_force, TimeInForce::Ioc);
+
+            // For trigger orders, `p` must be set to the trigger price (not "0"),
+            // even for market-on-trigger. Hyperliquid validates this field.
+            let price_str = if is_market {
+                trigger_px.clone()
+            } else {
+                price.normalize().to_string()
+            };
+
+            let msgpack = build_trigger_order_msgpack(
+                asset_idx,
+                is_buy,
+                &price_str,
+                &volume.normalize().to_string(),
+                reduce_only,
+                &trigger_px,
+                is_market,
+                tpsl,
+                cloid_hex.as_deref(),
+            );
+
+            let json_type = if is_market {
+                format!(
+                    r#"{{"trigger":{{"isMarket":true,"triggerPx":"{}","tpsl":"{}"}}}}"#,
+                    trigger_px, tpsl
+                )
+            } else {
+                format!(
+                    r#"{{"trigger":{{"isMarket":false,"triggerPx":"{}","tpsl":"{}"}}}}"#,
+                    trigger_px, tpsl
+                )
+            };
+
+            (msgpack, json_type)
+        } else {
+            // --- Regular limit/market order ---
+            let (order_kind, tif_bytes) = match order_type {
+                OrderType::Limit => ("limit", tif_str.as_bytes()),
+                OrderType::Market => ("limit", b"Ioc".as_slice()),
+                _ => unreachable!(),
+            };
+
+            let price_str = price.normalize().to_string();
+            let size_str = volume.normalize().to_string();
+
+            let msgpack = build_order_msgpack(
+                asset_idx,
+                is_buy,
+                &price_str,
+                &size_str,
+                reduce_only,
+                order_kind,
+                tif_bytes,
+                cloid_hex.as_deref(),
+            );
+
+            let json_type = match order_type {
+                OrderType::Limit => format!(r#"{{"limit":{{"tif":"{tif_str}"}}}}"#),
+                OrderType::Market => r#"{"limit":{"tif":"Ioc"}}"#.to_string(),
+                _ => unreachable!(),
+            };
+
+            (msgpack, json_type)
+        };
 
         // Build the action-level msgpack with Python SDK field order (insertion order):
         // type → orders → grouping
@@ -1060,23 +1189,29 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("grouping".to_string())));
         action_msgpack.extend_from_slice(&value_to_msgpack(&Value::String("na".to_string())));
 
-        // Build JSON with official SDK field order (alphabetical):
-        // grouping → orders → type
-        let order_type_json = match order_type {
-            OrderType::Limit => format!(r#"{{"limit":{{"tif":"{tif_str}"}}}}"#),
-            OrderType::Market => r#"{"limit":{"tif":"Ioc"}}"#.to_string(),
-        };
-
         let cloid_json = if let Some(ref c) = cloid_hex {
             format!(r#","c":"{c}""#)
         } else {
             String::new()
         };
 
+        let reduce_json = if reduce_only { "true" } else { "false" };
+
+        let price_for_json = if is_trigger && matches!(time_in_force, TimeInForce::Ioc) {
+            // For market-on-trigger, use trigger price (same as msgpack)
+            if let Some(ref tp) = trigger_price {
+                tp.normalize().to_string()
+            } else {
+                price.normalize().to_string()
+            }
+        } else {
+            price.normalize().to_string()
+        };
+
         let action_json_str = format!(
-            r#"{{"type":"order","orders":[{{"a":{asset_idx},"b":{is_buy},"p":"{price}","s":"{size}","r":false,"t":{order_type_json}{cloid_json}}}],"grouping":"na"}}"#,
-            price = price_str,
-            size = size_str,
+            r#"{{"type":"order","orders":[{{"a":{asset_idx},"b":{is_buy},"p":"{price}","s":"{size}","r":{reduce_json},"t":{order_type_json}{cloid_json}}}],"grouping":"na"}}"#,
+            price = price_for_json,
+            size = volume.normalize().to_string(),
         );
 
         // Sign using the canonical msgpack (matching Python's field order)
@@ -1170,6 +1305,9 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             quantity: volume,
             timestamp_ms,
             cloid: returned_cloid.or(cloid),
+            order_type,
+            trigger_price,
+            reduce_only,
         })
     }
 
@@ -1220,7 +1358,9 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
     }
 
     /// Cancels a single order by its client order ID (cloid). Requires `with_auth`.
-    /// Fetches open orders to resolve the coin/asset for the matching cloid before cancelling.
+    /// Fetches open orders to resolve the order ID for the matching cloid, then
+    /// submits a cancel action using the order ID — this works for all order types
+    /// including trigger orders (TakeProfit/StopLoss).
     async fn cancel_order_by_cloid(&self, cloid: String) -> Result<(), String> {
         let user = self.require_user_address()?;
 
@@ -1238,10 +1378,23 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .find(|o| o.cloid.as_ref() == Some(&cloid))
             .ok_or_else(|| format!("order with cloid {} not found", cloid))?;
 
-        let asset_idx = self.get_asset_index(&order.coin).await?;
+        // meta → weight 20
+        let meta_resp = self
+            .info_post(serde_json::json!({"type": "meta"}), 20, "cancel_order_by_cloid")
+            .await?;
+        let meta: MetaResponse = parse_response(meta_resp).await?;
+
+        let asset_idx = meta
+            .universe
+            .iter()
+            .position(|a| a.name == order.coin)
+            .ok_or_else(|| format!("asset {} not found in meta", order.coin))?;
+
+        // Use the same "cancel" action type as cancel_all_order, which is
+        // proven to work for all order types including trigger orders.
         let action = serde_json::json!({
-            "type": "cancelByCloid",
-            "cancels": [{"asset": asset_idx, "cloid": cloid}]
+            "type": "cancel",
+            "cancels": [{"a": asset_idx, "o": order.oid}]
         });
 
         self.submit_signed_action(action, None).await?;
@@ -1551,6 +1704,9 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
                     price,
                     quantity,
                     filled_quantity,
+                    order_type: None, // openOrders REST endpoint doesn't return order type
+                    trigger_price: None, // trigger info not included in openOrders response
+                    reduce_only: false, // default; REST doesn't expose this field
                 })
             })
             .collect())

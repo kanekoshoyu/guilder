@@ -35,12 +35,15 @@ class OrderType(Enum):
 	"""order execution type"""
 	Market = 1
 	Limit = 2
+	TakeProfit = 3
+	StopLoss = 4
 
 class TimeInForce(Enum):
 	"""how long an order remains active"""
 	Gtc = 1
 	Ioc = 2
 	Fok = 3
+	Alo = 4
 
 class VolumeDenomination(Enum):
 	"""which currency the volume is expressed in"""
@@ -113,17 +116,20 @@ class Position:
 
 class OpenOrder:
 	"""resting order"""
-	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, filled_quantity: str):
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, filled_quantity: str, order_type: Option<OrderType>, trigger_price: Option<Decimal>, reduce_only: bool):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.side = side
 		self.price = price
 		self.quantity = quantity
 		self.filled_quantity = filled_quantity
+		self.order_type = order_type
+		self.trigger_price = trigger_price
+		self.reduce_only = reduce_only
 
 class OrderPlacement:
 	"""order placement response"""
-	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int, cloid: Option<String>):
+	def __init__(self, order_id: int, symbol: str, side: OrderSide, price: str, quantity: str, timestamp_ms: int, cloid: Option<String>, order_type: OrderType, trigger_price: Option<Decimal>, reduce_only: bool):
 		self.order_id = order_id
 		self.symbol = symbol
 		self.side = side
@@ -131,6 +137,9 @@ class OrderPlacement:
 		self.quantity = quantity
 		self.timestamp_ms = timestamp_ms
 		self.cloid = cloid
+		self.order_type = order_type
+		self.trigger_price = trigger_price
+		self.reduce_only = reduce_only
 
 class UserFill:
 	"""execution of the user's own order"""
@@ -258,7 +267,7 @@ class GetMarketData(ABC):
 class ManageOrder(ABC):
 	"""place, change, cancel order"""
 	@abstractmethod
-	async def place_order(self, symbol: str, side: OrderSide, price: str, volume: str, order_type: OrderType, time_in_force: TimeInForce, cloid: Option<String>) -> Result<OrderPlacement, String>:
+	async def place_order(self, symbol: str, side: OrderSide, price: str, volume: str, order_type: OrderType, time_in_force: TimeInForce, trigger_price: Option<Decimal>, reduce_only: bool, cloid: Option<String>) -> Result<OrderPlacement, String>:
 		"""place order with optional client order ID for end-to-end tracking"""
 		pass
 

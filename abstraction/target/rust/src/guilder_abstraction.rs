@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use rust_decimal::Decimal;
 use std::pin::Pin;
 use futures_core::Stream;
+use serde::{Serialize, Deserialize};
 
 pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Status {
 	/// task succeeded
 	Success,
@@ -18,7 +19,7 @@ pub enum Status {
 }
 
 /// orderbook side
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Side {
 	/// bid side
 	Bid,
@@ -27,7 +28,7 @@ pub enum Side {
 }
 
 /// direction of an order
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OrderSide {
 	/// buy order
 	Buy,
@@ -36,7 +37,7 @@ pub enum OrderSide {
 }
 
 /// lifecycle state of an order
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OrderStatus {
 	/// order accepted by exchange
 	Placed,
@@ -49,7 +50,7 @@ pub enum OrderStatus {
 }
 
 /// type of market
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MarketType {
 	/// spot market
 	Spot,
@@ -60,16 +61,20 @@ pub enum MarketType {
 }
 
 /// order execution type
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OrderType {
-	/// execute immediately
+	/// execute immediately at market price
 	Market,
-	/// execute at specified price
+	/// execute at specified price or better
 	Limit,
+	/// trigger order that fires as market/limit when price reaches take-profit level
+	TakeProfit,
+	/// trigger order that fires as market/limit when price reaches stop-loss level
+	StopLoss,
 }
 
 /// how long an order remains active
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TimeInForce {
 	/// good till cancel
 	Gtc,
@@ -77,10 +82,12 @@ pub enum TimeInForce {
 	Ioc,
 	/// fill or kill
 	Fok,
+	/// add liquidity only (post-only, never taker)
+	Alo,
 }
 
 /// which currency the volume is expressed in
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VolumeDenomination {
 	/// base currency
 	Base,
@@ -89,7 +96,7 @@ pub enum VolumeDenomination {
 }
 
 /// broad class of asset
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AssetClass {
 	/// cryptocurrency
 	Crypto,
@@ -172,6 +179,9 @@ pub struct OpenOrder {
 	pub price: Decimal,
 	pub quantity: Decimal,
 	pub filled_quantity: Decimal,
+	pub order_type: Option<OrderType>,
+	pub trigger_price: Option<Decimal>,
+	pub reduce_only: bool,
 }
 
 /// order placement response
@@ -184,6 +194,9 @@ pub struct OrderPlacement {
 	pub quantity: Decimal,
 	pub timestamp_ms: i64,
 	pub cloid: Option<String>,
+	pub order_type: OrderType,
+	pub trigger_price: Option<Decimal>,
+	pub reduce_only: bool,
 }
 
 /// execution of the user's own order
@@ -294,7 +307,7 @@ pub trait GetMarketData {
 #[allow(clippy::too_many_arguments)]
 pub trait ManageOrder {
 	/// place order with optional client order ID for end-to-end tracking
-	async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce, cloid: Option<String>) -> Result<OrderPlacement, String>;
+	async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce, trigger_price: Option<Decimal>, reduce_only: bool, cloid: Option<String>) -> Result<OrderPlacement, String>;
 	/// change order
 	async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String>;
 	/// cancel order by cloid

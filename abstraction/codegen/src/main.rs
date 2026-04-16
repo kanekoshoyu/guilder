@@ -381,6 +381,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
     if has_decimal {
         code.push_str("use rust_decimal::Decimal;\n");
     }
+    code.push_str("use serde::{Deserialize, Serialize};\n");
     if has_stream {
         code.push_str("use std::pin::Pin;\n");
         code.push_str("use futures_core::Stream;\n");
@@ -395,7 +396,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
         if let Some(desc) = &en.description {
             code.push_str(&format!("/// {}\n", desc));
         }
-        code.push_str("#[derive(Debug, Clone, PartialEq)]\n");
+        code.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
         code.push_str(&format!("pub enum {} {{\n", en.name));
         for value in &en.values {
             if let Some(desc) = &value.description {
