@@ -1240,8 +1240,8 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         let asset_idx = self.get_asset_index(&order.coin).await?;
         let action = serde_json::json!({
-            "type": "cancel",
-            "cancels": [{"a": asset_idx, "cloid": cloid}]
+            "type": "cancelByCloid",
+            "cancels": [{"asset": asset_idx, "cloid": cloid}]
         });
 
         self.submit_signed_action(action, None).await?;

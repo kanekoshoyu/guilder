@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.18 — 2026-04-16
+
+- Fix `cancel_order_by_cloid` HTTP 422 deserialization error
+  - Was: `{"type": "cancel", "cancels": [{"a": asset_idx, "cloid": cloid}]}`
+  - Now: `{"type": "cancelByCloid", "cancels": [{"asset": asset_idx, "cloid": cloid}]}`
+  - The Hyperliquid API requires the distinct `cancelByCloid` action type and camelCase `asset` field name
+
 ## 0.4.16 — 2026-04-16
 
 - Remove keccak256 hashing of cloid — client now passes cloid through verbatim to Hyperliquid
