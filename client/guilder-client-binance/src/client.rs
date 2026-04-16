@@ -104,7 +104,7 @@ impl guilder_abstraction::ManageOrder for BinanceClient {
         unimplemented!()
     }
 
-    async fn cancel_order(&self, cloid: i64) -> Result<i64, String> {
+    async fn cancel_order_by_cloid(&self, cloid: String) -> Result<(), String> {
         unimplemented!()
     }
 

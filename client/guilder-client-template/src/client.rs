@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -78,7 +78,7 @@ impl guilder_abstraction::ManageOrder for ExchangeClient {
         Err("not implemented".to_string())
     }
 
-    async fn cancel_order(&self, cloid: i64) -> Result<i64, String> {
+    async fn cancel_order_by_cloid(&self, cloid: String) -> Result<(), String> {
         Err("not implemented".to_string())
     }
 

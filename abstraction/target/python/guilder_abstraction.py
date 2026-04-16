@@ -268,7 +268,7 @@ class ManageOrder(ABC):
 		pass
 
 	@abstractmethod
-	async def cancel_order(self, cloid: int) -> Result<i64, String>:
+	async def cancel_order_by_cloid(self, cloid: str) -> Result<(), String>:
 		"""cancel order by cloid"""
 		pass
 

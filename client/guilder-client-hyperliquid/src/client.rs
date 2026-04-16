@@ -257,6 +257,7 @@ struct RestOpenOrder {
     sz: String,
     oid: i64,
     orig_sz: String,
+    cloid: Option<String>,
 }
 
 // predictedFundings response: Vec<(coin, Vec<(venue, entry_or_null)>)>
@@ -1218,9 +1219,9 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         Ok(cloid)
     }
 
-    /// Cancels a single order by its order ID. Requires `with_auth`.
-    /// Fetches open orders to resolve the coin/asset before cancelling.
-    async fn cancel_order(&self, cloid: i64) -> Result<i64, String> {
+    /// Cancels a single order by its client order ID (cloid). Requires `with_auth`.
+    /// Fetches open orders to resolve the coin/asset for the matching cloid before cancelling.
+    async fn cancel_order_by_cloid(&self, cloid: String) -> Result<(), String> {
         let user = self.require_user_address()?;
 
         // openOrders → weight 20
@@ -1228,23 +1229,23 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .info_post(
                 serde_json::json!({"type": "openOrders", "user": user}),
                 20,
-                "cancel_order",
+                "cancel_order_by_cloid",
             )
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
         let order = orders
             .iter()
-            .find(|o| o.oid == cloid)
-            .ok_or_else(|| format!("order {} not found", cloid))?;
+            .find(|o| o.cloid.as_ref() == Some(&cloid))
+            .ok_or_else(|| format!("order with cloid {} not found", cloid))?;
 
         let asset_idx = self.get_asset_index(&order.coin).await?;
         let action = serde_json::json!({
             "type": "cancel",
-            "cancels": [{"a": asset_idx, "o": cloid}]
+            "cancels": [{"a": asset_idx, "cloid": cloid}]
         });
 
         self.submit_signed_action(action, None).await?;
-        Ok(cloid)
+        Ok(())
     }
 
     /// Cancels all open orders. Requires `with_auth`.

@@ -298,7 +298,7 @@ pub trait ManageOrder {
 	/// change order
 	async fn change_order_by_cloid(&self, cloid: i64, price: Decimal, volume: Decimal) -> Result<i64, String>;
 	/// cancel order by cloid
-	async fn cancel_order(&self, cloid: i64) -> Result<i64, String>;
+	async fn cancel_order_by_cloid(&self, cloid: String) -> Result<(), String>;
 	/// cancel all order regardless of cloid/symbol
 	async fn cancel_all_order(&self) -> Result<bool, String>;
 }

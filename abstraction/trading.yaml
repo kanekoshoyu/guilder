@@ -100,12 +100,12 @@ traits:
             type: Decimal
         return_type: Result<i64, String>
 
-      - name: cancel_order
+      - name: cancel_order_by_cloid
         description: cancel order by cloid
         args:
           - name: cloid
-            type: i64
-        return_type: Result<i64, String>
+            type: String
+        return_type: Result<(), String>
 
       - name: cancel_all_order
         description: cancel all order regardless of cloid/symbol
