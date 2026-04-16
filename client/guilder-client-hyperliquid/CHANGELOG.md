@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.16 — 2026-04-16
+
+- Remove keccak256 hashing of cloid — client now passes cloid through verbatim to Hyperliquid
+  - Was: `cloid = "0x" + keccak256(c.as_bytes())[:16]` — hashed the client order ID before signing
+  - Now: cloid string passed through unchanged, Hyperliquid echoes it back verbatim on fills
+  - Enables end-to-end intent tracing: strategy UUID → cloid → fill.cloid → trade_intent_uuid resolution
+
 ## 0.4.11 — 2026-04-14
 
 - Fix order submission 422: add `expiresAfter` field to JSON payload

@@ -1031,10 +1031,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
         let price_str = price.normalize().to_string();
         let size_str = volume.normalize().to_string();
 
-        let cloid_hex = cloid.as_ref().map(|c| {
-            let hash = keccak256(c.as_bytes());
-            format!("0x{}", hex::encode(&hash[..16]))
-        });
+        let cloid_hex = cloid.clone();
 
         // Build msgpack with Python SDK field order (matching the Python SDK's
         // msgpack output). The server hashes the msgpack for signature verification,
