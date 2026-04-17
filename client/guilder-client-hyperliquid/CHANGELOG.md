@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.19 — 2026-04-17
+
+- Fix: swap bid/ask side mapping in `get_l2_orderbook` and `subscribe_l2_update`
+  - Hyperliquid's `l2Book` returns `[bids, asks]` — index 0 is bids, index 1 is asks
+  - Was: `levels[0]` → `Side::Ask`, `levels[1]` → `Side::Bid` (crossed book)
+  - Now: `levels[0]` → `Side::Bid`, `levels[1]` → `Side::Ask`
+
 ## 0.4.18 — 2026-04-16
 
 - Fix `cancel_order_by_cloid` HTTP 422 deserialization error

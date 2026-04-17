@@ -990,7 +990,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
                     symbol: book.coin.clone(),
                     price,
                     volume,
-                    side: Side::Ask,
+                    side: Side::Bid,
                     sequence: book.time,
                 });
             }
@@ -1003,7 +1003,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
                     symbol: book.coin.clone(),
                     price,
                     volume,
-                    side: Side::Bid,
+                    side: Side::Ask,
                     sequence: book.time,
                 });
             }
@@ -1470,7 +1470,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                             symbol: book.coin.clone(),
                             price,
                             volume,
-                            side: Side::Ask,
+                            side: Side::Bid,
                             sequence: book.time,
                         });
                     }
@@ -1483,7 +1483,7 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
                             symbol: book.coin.clone(),
                             price,
                             volume,
-                            side: Side::Bid,
+                            side: Side::Ask,
                             sequence: book.time,
                         });
                     }
