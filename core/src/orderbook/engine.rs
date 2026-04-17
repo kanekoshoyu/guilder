@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
 use rust_decimal::Decimal;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio::time::Instant;
@@ -9,6 +10,50 @@ use super::convert::apply_update;
 use super::error::EngineError;
 use super::sync::sync_loop;
 use super::types::{BookUpdate, Orderbook};
+
+/// Per-symbol reconciliation health data.
+#[derive(Debug, Clone)]
+pub struct ReconciliationHealth {
+    /// True if drift was detected during the last validation.
+    pub drift_detected: bool,
+    /// When the last REST validation completed.
+    pub last_validation: Instant,
+    /// Number of level mismatches found during last validation (0 if none).
+    pub mismatch_levels: usize,
+    /// Whether a correction was applied (book replaced with REST snapshot).
+    pub corrected: bool,
+}
+
+/// Serialisable view of reconciliation health for API export.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReconciliationHealthView {
+    pub drift_detected: bool,
+    pub last_validation_secs_ago: u64,
+    pub mismatch_levels: usize,
+    pub corrected: bool,
+}
+
+impl ReconciliationHealth {
+    pub fn view(&self) -> ReconciliationHealthView {
+        ReconciliationHealthView {
+            drift_detected: self.drift_detected,
+            last_validation_secs_ago: self.last_validation.elapsed().as_secs(),
+            mismatch_levels: self.mismatch_levels,
+            corrected: self.corrected,
+        }
+    }
+}
+
+impl Default for ReconciliationHealth {
+    fn default() -> Self {
+        Self {
+            drift_detected: false,
+            last_validation: Instant::now(),
+            mismatch_levels: 0,
+            corrected: false,
+        }
+    }
+}
 
 pub struct OrderbookEngine<C> {
     client: Arc<C>,
@@ -23,6 +68,14 @@ pub struct OrderbookEngine<C> {
     /// seed the orderbook. Useful for exchanges (e.g. Hyperliquid) whose WS
     /// streams deliver full snapshots on every tick.
     skip_initial_snapshot: bool,
+    /// Interval between reconciliation checks. `None` = disabled.
+    reconciliation_interval: Option<std::time::Duration>,
+    /// Total number of drift detections (mismatches found).
+    pub total_drifts: Arc<AtomicU64>,
+    /// Total number of corrections applied (book replaced).
+    pub total_corrections: Arc<AtomicU64>,
+    /// Per-symbol reconciliation health — written by reconcile loop, read by handle.
+    reconciliation_health: Arc<DashMap<String, ReconciliationHealth>>,
 }
 
 impl<C> OrderbookEngine<C>
@@ -44,6 +97,10 @@ where
             update_tx,
             rest_semaphore: Arc::new(Semaphore::new(Self::SNAPSHOT_CONCURRENCY)),
             skip_initial_snapshot: false,
+            reconciliation_interval: None,
+            total_drifts: Arc::new(AtomicU64::new(0)),
+            total_corrections: Arc::new(AtomicU64::new(0)),
+            reconciliation_health: Arc::new(DashMap::new()),
         }
     }
 
@@ -53,6 +110,24 @@ where
     pub fn with_skip_initial_snapshot(mut self, skip: bool) -> Self {
         self.skip_initial_snapshot = skip;
         self
+    }
+
+    /// Enable periodic reconciliation against REST snapshots.
+    ///
+    /// The reconciliation loop compares the local orderbook against a fresh
+    /// REST fetch at the given interval. On mismatch, the local book is
+    /// replaced with the REST snapshot. Drift counts and per-symbol health
+    /// are exposed via [`OrderbookEngine::total_drifts`], [`OrderbookEngine::total_corrections`],
+    /// and [`OrderbookEngine::reconciliation_health()`].
+    pub fn with_reconciliation(mut self, interval: std::time::Duration) -> Self {
+        self.reconciliation_interval = Some(interval);
+        self
+    }
+
+    /// Set reconciliation interval on an already-constructed engine.
+    /// Use with `Arc::get_mut()` before cloning or starting `track_all()`.
+    pub fn set_reconciliation(&mut self, interval: std::time::Duration) {
+        self.reconciliation_interval = Some(interval);
     }
 
     /// Subscribe to a broadcast channel of orderbook updates.
@@ -67,6 +142,108 @@ where
     pub async fn track_all(&self) -> Result<(), EngineError> {
         let symbols = self.client.get_symbol().await?;
         self.track(symbols).await
+    }
+
+    /// Spawn the reconciliation loop as a background task.
+    /// Must be run inside a `tokio::task::LocalSet` (same constraint as `track_all`).
+    /// Call this before `track()`/`track_all()` if you want reconciliation running.
+    /// The task runs until the client's symbol stream ends or all symbols are dropped.
+    pub fn spawn_reconciliation(self: &Arc<Self>) {
+        let Some(interval) = self.reconciliation_interval else {
+            return;
+        };
+
+        let books = Arc::clone(&self.books);
+        let last_updated = Arc::clone(&self.last_updated);
+        let client = Arc::clone(&self.client);
+        let rest_semaphore = Arc::clone(&self.rest_semaphore);
+        let total_drifts = Arc::clone(&self.total_drifts);
+        let total_corrections = Arc::clone(&self.total_corrections);
+        let health = Arc::clone(&self.reconciliation_health);
+
+        tokio::task::spawn_local(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+
+                // Collect snapshot of current symbols to reconcile.
+                let symbols: Vec<String> = books.iter().map(|e| e.key().clone()).collect();
+                if symbols.is_empty() {
+                    continue;
+                }
+
+                for symbol in &symbols {
+                    let rest_snapshot = match fetch_rest_book(client.as_ref(), &rest_semaphore, symbol).await
+                    {
+                        Some(s) => s,
+                        None => {
+                            health.insert(
+                                symbol.clone(),
+                                ReconciliationHealth {
+                                    drift_detected: false,
+                                    last_validation: Instant::now(),
+                                    mismatch_levels: 0,
+                                    corrected: false,
+                                },
+                            );
+                            continue;
+                        }
+                    };
+
+                    // Compare local vs REST.
+                    let local = books.get(symbol);
+                    let (mismatches, needs_replace) = match &local {
+                        Some(entry) => {
+                            compare_books(entry.value(), &rest_snapshot)
+                        }
+                        None => (0, true),
+                    };
+
+                    let corrected = if needs_replace {
+                        let mut book = Orderbook::new();
+                        for update in &rest_snapshot {
+                            apply_update(&mut book, update);
+                        }
+                        books.insert(symbol.clone(), book);
+                        true
+                    } else {
+                        false
+                    };
+
+                    // Refresh last_updated on any successful REST validation
+                    // (correction or clean match) — this prevents the staleness
+                    // gate from rejecting low-activity coins that haven't seen
+                    // a WS message recently.
+                    last_updated.insert(symbol.clone(), Instant::now());
+
+                    if mismatches > 0 {
+                        total_drifts.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if corrected {
+                        total_corrections.fetch_add(1, Ordering::Relaxed);
+                    }
+
+                    health.insert(
+                        symbol.clone(),
+                        ReconciliationHealth {
+                            drift_detected: mismatches > 0,
+                            last_validation: Instant::now(),
+                            mismatch_levels: mismatches,
+                            corrected,
+                        },
+                    );
+                }
+            }
+        });
+    }
+
+    /// Per-symbol reconciliation health (serialisable view).
+    pub fn reconciliation_health(&self) -> Vec<(String, ReconciliationHealthView)> {
+        self.reconciliation_health
+            .iter()
+            .map(|e| (e.key().clone(), e.value().view()))
+            .collect()
     }
 
     /// Subscribe to a specific set of symbols and block, syncing orderbooks.
@@ -239,5 +416,201 @@ where
     pub fn imbalance(&self, symbol: &str, top_n: Option<usize>) -> Option<f64> {
         let book = self.books.get(symbol)?;
         book.imbalance(top_n)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation helpers — standalone functions for the spawned task.
+// ---------------------------------------------------------------------------
+
+/// Fetch a REST snapshot and return it as a flat list of updates.
+/// Returns `None` on failure.
+async fn fetch_rest_book<C>(
+    client: &C,
+    rest_semaphore: &Semaphore,
+    symbol: &str,
+) -> Option<Vec<guilder_abstraction::L2Update>>
+where
+    C: GetMarketData,
+{
+    let _permit = rest_semaphore.acquire().await.ok()?;
+    client.get_l2_orderbook(symbol.to_owned()).await.ok()
+}
+
+/// Compare a local orderbook against a REST snapshot.
+/// Returns `(mismatch_count, needs_replace)`.
+/// `needs_replace` is true when any level differs — even a single mismatch
+/// means the local book is stale, since Hyperliquid WS sends the full book
+/// every tick, not incremental diffs.
+fn compare_books(
+    local: &Orderbook,
+    rest_snapshot: &[guilder_abstraction::L2Update],
+) -> (usize, bool) {
+    let local_levels = local.snapshot(None);
+
+    // Build sorted vectors from both sides for comparison.
+    // Key by (side_as_int, price) so we can use Vec + sort instead of HashMap.
+    let mut local_sorted: Vec<(u8, Decimal, Decimal)> = local_levels
+        .iter()
+        .map(|(side, price, vol)| {
+            let side_tag = match side {
+                Side::Bid => 0u8,
+                Side::Ask => 1u8,
+            };
+            (side_tag, *price, *vol)
+        })
+        .collect();
+    local_sorted.sort_by_key(|(s, p, _)| (*s, *p));
+
+    let mut rest_sorted: Vec<(u8, Decimal, Decimal)> = rest_snapshot
+        .iter()
+        .map(|u| {
+            let side_tag = match u.side {
+                Side::Bid => 0u8,
+                Side::Ask => 1u8,
+            };
+            (side_tag, u.price, u.volume)
+        })
+        .collect();
+    rest_sorted.sort_by_key(|(s, p, _)| (*s, *p));
+
+    // Two-pointer diff to count mismatches.
+    let mut mismatches = 0usize;
+    let mut i = 0;
+    let mut j = 0;
+    while i < local_sorted.len() && j < rest_sorted.len() {
+        let (ls, lp, lv) = &local_sorted[i];
+        let (rs, rp, rv) = &rest_sorted[j];
+        match (ls, lp).cmp(&(rs, rp)) {
+            std::cmp::Ordering::Equal => {
+                if *lv != *rv {
+                    mismatches += 1;
+                }
+                i += 1;
+                j += 1;
+            }
+            std::cmp::Ordering::Less => {
+                // Level in local but not in REST
+                mismatches += 1;
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                // Level in REST but not in local
+                mismatches += 1;
+                j += 1;
+            }
+        }
+    }
+    // Remaining levels on either side are mismatches
+    mismatches += local_sorted.len() - i;
+    mismatches += rest_sorted.len() - j;
+
+    let needs_replace = mismatches > 0;
+    (mismatches, needs_replace)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    fn make_update(symbol: &str, price: Decimal, volume: Decimal, side: Side) -> guilder_abstraction::L2Update {
+        guilder_abstraction::L2Update {
+            symbol: symbol.to_string(),
+            price,
+            volume,
+            side,
+            sequence: 0,
+        }
+    }
+
+    #[test]
+    fn test_compare_books_identical() {
+        let mut book = Orderbook::new();
+        book.update_bid(dec!(100), dec!(10));
+        book.update_ask(dec!(101), dec!(5));
+
+        let rest = vec![
+            make_update("BTC", dec!(101), dec!(5), Side::Ask),
+            make_update("BTC", dec!(100), dec!(10), Side::Bid),
+        ];
+
+        let (mismatches, needs_replace) = compare_books(&book, &rest);
+        assert_eq!(mismatches, 0);
+        assert!(!needs_replace);
+    }
+
+    #[test]
+    fn test_compare_books_volume_drift() {
+        let mut book = Orderbook::new();
+        book.update_bid(dec!(100), dec!(10));
+        book.update_ask(dec!(101), dec!(5));
+
+        let rest = vec![
+            make_update("BTC", dec!(101), dec!(5), Side::Ask),
+            make_update("BTC", dec!(100), dec!(8), Side::Bid), // volume changed
+        ];
+
+        let (mismatches, needs_replace) = compare_books(&book, &rest);
+        assert_eq!(mismatches, 1);
+        assert!(needs_replace);
+    }
+
+    #[test]
+    fn test_compare_books_missing_level() {
+        let mut book = Orderbook::new();
+        book.update_bid(dec!(100), dec!(10));
+        book.update_bid(dec!(99), dec!(5));
+        book.update_ask(dec!(101), dec!(5));
+
+        let rest = vec![
+            make_update("BTC", dec!(101), dec!(5), Side::Ask),
+            make_update("BTC", dec!(100), dec!(10), Side::Bid),
+            // level at 99 removed
+        ];
+
+        let (mismatches, needs_replace) = compare_books(&book, &rest);
+        assert_eq!(mismatches, 1);
+        assert!(needs_replace);
+    }
+
+    #[test]
+    fn test_compare_books_new_level() {
+        let mut book = Orderbook::new();
+        book.update_bid(dec!(100), dec!(10));
+        book.update_ask(dec!(101), dec!(5));
+
+        let rest = vec![
+            make_update("BTC", dec!(101), dec!(5), Side::Ask),
+            make_update("BTC", dec!(100), dec!(10), Side::Bid),
+            make_update("BTC", dec!(99), dec!(3), Side::Bid), // new level
+        ];
+
+        let (mismatches, needs_replace) = compare_books(&book, &rest);
+        assert_eq!(mismatches, 1);
+        assert!(needs_replace);
+    }
+
+    #[test]
+    fn test_compare_books_empty_local() {
+        let book = Orderbook::new();
+        let rest = vec![
+            make_update("BTC", dec!(101), dec!(5), Side::Ask),
+            make_update("BTC", dec!(100), dec!(10), Side::Bid),
+        ];
+
+        let (mismatches, needs_replace) = compare_books(&book, &rest);
+        assert_eq!(mismatches, 2);
+        assert!(needs_replace);
+    }
+
+    #[test]
+    fn test_compare_books_both_empty() {
+        let book = Orderbook::new();
+        let rest: Vec<guilder_abstraction::L2Update> = vec![];
+
+        let (mismatches, needs_replace) = compare_books(&book, &rest);
+        assert_eq!(mismatches, 0);
+        assert!(!needs_replace);
     }
 }

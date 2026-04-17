@@ -9,6 +9,7 @@ pub mod account;
 #[cfg(feature = "engine")]
 pub use orderbook::{
     BookUpdate, CurrencyPair, EngineError, IndexOrderbook, Orderbook, OrderbookEngine,
+    ReconciliationHealthView,
 };
 
 #[cfg(feature = "account")]

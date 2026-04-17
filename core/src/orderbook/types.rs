@@ -16,8 +16,8 @@ pub struct BookUpdate {
 
 #[derive(Clone, Debug)]
 pub struct Orderbook {
-    asks: BTreeMap<Decimal, Decimal>,
-    bids: BTreeMap<Decimal, Decimal>,
+    pub(crate) asks: BTreeMap<Decimal, Decimal>,
+    pub(crate) bids: BTreeMap<Decimal, Decimal>,
 }
 
 impl Orderbook {

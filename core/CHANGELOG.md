@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.1 — 2026-04-17
+
+- Fix: refresh `last_updated` on every successful REST validation (not just on correction), so the staleness gate doesn't reject low-activity coins that are reconciling cleanly
+
+## 0.6.0 — 2026-04-17
+
+- Add optional orderbook reconciliation — periodic REST vs WS book comparison
+  - `OrderbookEngine::with_reconciliation(interval)` — enables the feature
+  - `OrderbookEngine::set_reconciliation(interval)` — post-construction setter
+  - `OrderbookEngine::spawn_reconciliation()` — starts the background loop (uses `spawn_local`, requires `LocalSet`)
+  - On drift detection, the local book is automatically replaced with the REST snapshot
+  - `OrderbookEngine::total_drifts` / `total_corrections` — atomic counters
+  - `OrderbookEngine::reconciliation_health()` — per-symbol health with drift/correction status
+- New types: `ReconciliationHealth`, `ReconciliationHealthView` (serialisable)
+
 ## 0.4.0 — 2026-04-10
 
 - Restructure `core/src/` modules for consistent file layout:

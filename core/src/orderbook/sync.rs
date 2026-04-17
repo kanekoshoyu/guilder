@@ -47,6 +47,7 @@ pub(crate) async fn sync_loop<C>(
     let mut stream = client.subscribe_l2_update(symbol.clone());
     let mut last_seq: Option<i64> = None;
 
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(update) => {
@@ -69,13 +70,23 @@ pub(crate) async fn sync_loop<C>(
                         }
                     }
                 }
+                let new_snapshot = last_seq.is_none_or(|prev| update.sequence != prev);
                 last_seq = Some(update.sequence);
 
                 // broadcast update before applying
                 let _ = update_tx.send(to_book_update(&update));
 
-                let mut book = books.entry(symbol.clone()).or_insert_with(Orderbook::new);
-                apply_update(book.value_mut(), &update);
+                // When WS is the source of truth (e.g. Hyperliquid full
+                // snapshots per tick), replace the book at the start of each
+                // new snapshot — otherwise stale levels accumulate forever.
+                if ws_is_source_of_truth && new_snapshot {
+                    let mut book = Orderbook::new();
+                    apply_update(&mut book, &update);
+                    books.insert(symbol.clone(), book);
+                } else {
+                    let mut book = books.entry(symbol.clone()).or_insert_with(Orderbook::new);
+                    apply_update(book.value_mut(), &update);
+                }
                 last_updated.insert(symbol.clone(), Instant::now());
             }
             Err(_) => {

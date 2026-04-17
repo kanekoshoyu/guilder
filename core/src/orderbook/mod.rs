@@ -6,6 +6,6 @@ mod sync;
 mod types;
 
 pub use currency_pair::CurrencyPair;
-pub use engine::OrderbookEngine;
+pub use engine::{OrderbookEngine, ReconciliationHealth, ReconciliationHealthView};
 pub use error::EngineError;
 pub use types::{BookUpdate, IndexOrderbook, Orderbook};
