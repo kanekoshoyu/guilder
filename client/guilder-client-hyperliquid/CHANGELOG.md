@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.19 — 2026-04-17
+## 0.4.20 — 2026-04-17
 
 - Fix: swap bid/ask side mapping in `get_l2_orderbook` and `subscribe_l2_update`
   - Hyperliquid's `l2Book` returns `[bids, asks]` — index 0 is bids, index 1 is asks
