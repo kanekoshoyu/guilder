@@ -8,8 +8,8 @@ pub mod account;
 
 #[cfg(feature = "engine")]
 pub use orderbook::{
-    BookUpdate, CurrencyPair, EngineError, IndexOrderbook, Orderbook, OrderbookEngine,
-    ReconciliationHealthView,
+    BookUpdate, BoundedVec, CurrencyPair, EngineError, Orderbook, OrderbookEngine,
+    ReconciliationHealthView, SortedVec,
 };
 
 #[cfg(feature = "account")]

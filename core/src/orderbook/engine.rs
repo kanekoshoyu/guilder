@@ -1,13 +1,16 @@
+use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
 use rust_decimal::Decimal;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, Semaphore};
-use tokio::time::Instant;
+use tracing::{debug, info, warn};
 
 use super::convert::apply_update;
 use super::error::EngineError;
+use super::storage::PriceLevelStorage;
 use super::sync::sync_loop;
 use super::types::{BookUpdate, Orderbook};
 
@@ -55,10 +58,13 @@ impl Default for ReconciliationHealth {
     }
 }
 
-pub struct OrderbookEngine<C> {
+pub struct OrderbookEngine<C, S = std::collections::BTreeMap<Decimal, Decimal>>
+where
+    S: PriceLevelStorage + Default + Send + 'static,
+{
     client: Arc<C>,
-    books: Arc<DashMap<String, Orderbook>>,
-    last_updated: Arc<DashMap<String, Instant>>,
+    books: Arc<DashMap<String, Orderbook<S>>>,
+    last_updated: Arc<DashMap<String, DateTime<Utc>>>,
     add_tx: mpsc::UnboundedSender<Vec<String>>,
     add_rx: Mutex<Option<mpsc::UnboundedReceiver<Vec<String>>>>,
     update_tx: broadcast::Sender<BookUpdate>,
@@ -78,13 +84,14 @@ pub struct OrderbookEngine<C> {
     reconciliation_health: Arc<DashMap<String, ReconciliationHealth>>,
 }
 
-impl<C> OrderbookEngine<C>
+/// Maximum number of concurrent REST snapshot requests to avoid rate-limiting.
+const SNAPSHOT_CONCURRENCY: usize = 10;
+
+impl<C, S> OrderbookEngine<C, S>
 where
     C: GetMarketData + SubscribeMarketData + Send + Sync + 'static,
+    S: PriceLevelStorage + Default + Send + 'static,
 {
-    /// Maximum number of concurrent REST snapshot requests to avoid rate-limiting.
-    const SNAPSHOT_CONCURRENCY: usize = 10;
-
     pub fn new(client: C) -> Self {
         let (add_tx, add_rx) = mpsc::unbounded_channel();
         let (update_tx, _) = broadcast::channel(4096);
@@ -95,7 +102,7 @@ where
             add_tx,
             add_rx: Mutex::new(Some(add_rx)),
             update_tx,
-            rest_semaphore: Arc::new(Semaphore::new(Self::SNAPSHOT_CONCURRENCY)),
+            rest_semaphore: Arc::new(Semaphore::new(SNAPSHOT_CONCURRENCY)),
             skip_initial_snapshot: false,
             reconciliation_interval: None,
             total_drifts: Arc::new(AtomicU64::new(0)),
@@ -153,7 +160,7 @@ where
             return;
         };
 
-        let books = Arc::clone(&self.books);
+        let books: Arc<DashMap<String, Orderbook<S>>> = Arc::clone(&self.books);
         let last_updated = Arc::clone(&self.last_updated);
         let client = Arc::clone(&self.client);
         let rest_semaphore = Arc::clone(&self.rest_semaphore);
@@ -201,7 +208,7 @@ where
                     };
 
                     let corrected = if needs_replace {
-                        let mut book = Orderbook::new();
+                        let mut book: Orderbook<S> = Orderbook::default();
                         for update in &rest_snapshot {
                             apply_update(&mut book, update);
                         }
@@ -215,7 +222,7 @@ where
                     // (correction or clean match) — this prevents the staleness
                     // gate from rejecting low-activity coins that haven't seen
                     // a WS message recently.
-                    last_updated.insert(symbol.clone(), Instant::now());
+                    last_updated.insert(symbol.clone(), Utc::now());
 
                     if mismatches > 0 {
                         total_drifts.fetch_add(1, Ordering::Relaxed);
@@ -244,6 +251,65 @@ where
             .iter()
             .map(|e| (e.key().clone(), e.value().view()))
             .collect()
+    }
+
+    /// Spawn a background staleness monitor that periodically checks all
+    /// tracked orderbooks for:
+    /// 1. **Wall-clock staleness** — no WS update received in `max_wall_age`
+    /// 2. **Exchange timestamp skew** — exchange WS timestamp > `max_skew` behind wall clock
+    ///
+    /// Warns once per symbol per tick when thresholds are breached.
+    /// Must be run inside a `tokio::task::LocalSet`.
+    pub fn spawn_staleness_monitor(
+        self: &Arc<Self>,
+        max_wall_age: std::time::Duration,
+        check_interval: std::time::Duration,
+    ) {
+        let last_updated = Arc::clone(&self.last_updated);
+
+        tokio::task::spawn_local(async move {
+            let mut ticker = tokio::time::interval(check_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+
+                let now = Utc::now();
+
+                let entries: Vec<_> = last_updated
+                    .iter()
+                    .map(|e| (e.key().clone(), *e.value()))
+                    .collect();
+
+                if entries.is_empty() {
+                    continue;
+                }
+
+                for (symbol, ts) in &entries {
+                    let age = now.signed_duration_since(*ts);
+                    if age.to_std().unwrap_or_default() > max_wall_age {
+                        warn!(
+                            symbol = symbol,
+                            last_update_secs_ago = age.num_seconds(),
+                            exchange_ts = ts.timestamp_millis(),
+                            "orderbook stale — no update received"
+                        );
+                    }
+
+                    debug!(
+                        symbol = symbol,
+                        wall_age_secs = age.num_seconds(),
+                        exchange_ts = ts.timestamp_millis(),
+                        "orderbook staleness check"
+                    );
+                }
+            }
+        });
+
+        info!(
+            max_wall_age_ms = max_wall_age.as_millis(),
+            check_interval_ms = check_interval.as_millis(),
+            "staleness monitor spawned"
+        );
     }
 
     /// Subscribe to a specific set of symbols and block, syncing orderbooks.
@@ -368,18 +434,18 @@ where
                     Ok::<_, String>((sym, snapshot))
                 }
             })
-            .buffer_unordered(Self::SNAPSHOT_CONCURRENCY)
+            .buffer_unordered(SNAPSHOT_CONCURRENCY)
             .collect()
             .await;
 
         for result in results {
             let (sym, snapshot) = result?;
-            let mut book = Orderbook::new();
+            let mut book: Orderbook<S> = Orderbook::default();
             for update in &snapshot {
                 apply_update(&mut book, update);
             }
             self.books.insert(sym.clone(), book);
-            self.last_updated.insert(sym, Instant::now());
+            self.last_updated.insert(sym, Utc::now());
         }
 
         Ok(())
@@ -392,13 +458,13 @@ where
         Some(book.snapshot(depth))
     }
 
-    /// When was this symbol's orderbook last updated?
-    pub fn last_updated(&self, symbol: &str) -> Option<Instant> {
+    /// Last exchange timestamp for this symbol's orderbook.
+    pub fn last_updated(&self, symbol: &str) -> Option<DateTime<Utc>> {
         self.last_updated.get(symbol).map(|r| *r.value())
     }
 
-    /// Health status for all tracked symbols: `(symbol, last_updated)`.
-    pub fn health(&self) -> Vec<(String, Instant)> {
+    /// Health status for all tracked symbols: `(symbol, last_exchange_timestamp)`.
+    pub fn health(&self) -> Vec<(String, DateTime<Utc>)> {
         self.last_updated
             .iter()
             .map(|entry| (entry.key().clone(), *entry.value()))
@@ -442,8 +508,8 @@ where
 /// `needs_replace` is true when any level differs — even a single mismatch
 /// means the local book is stale, since Hyperliquid WS sends the full book
 /// every tick, not incremental diffs.
-fn compare_books(
-    local: &Orderbook,
+fn compare_books<S: PriceLevelStorage>(
+    local: &Orderbook<S>,
     rest_snapshot: &[guilder_abstraction::L2Update],
 ) -> (usize, bool) {
     let local_levels = local.snapshot(None);
