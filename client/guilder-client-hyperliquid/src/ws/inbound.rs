@@ -16,27 +16,27 @@ use serde_json::Value;
 // Raw payload structs (deserialization only)
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsBook {
     pub(crate) coin: String,
     pub(crate) levels: Vec<Vec<HyperliquidWsLevel>>,
     pub(crate) time: i64,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsLevel {
     pub(crate) px: String,
     pub(crate) sz: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HyperliquidWsAssetCtx {
     pub(crate) coin: String,
     pub(crate) ctx: HyperliquidWsPerpsCtx,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HyperliquidWsPerpsCtx {
     pub(crate) open_interest: String,
@@ -49,7 +49,7 @@ pub(crate) struct HyperliquidWsPerpsCtx {
     pub(crate) prev_day_px: Option<String>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsUserEvent {
     pub(crate) liquidation: Option<HyperliquidWsLiquidation>,
     pub(crate) fills: Option<Vec<HyperliquidWsUserFill>>,
@@ -57,26 +57,26 @@ pub(crate) struct HyperliquidWsUserEvent {
     pub(crate) spot_state: Option<HyperliquidWsSpotState>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsSpotState {
     pub(crate) balances: Option<Vec<HyperliquidWsSpotBalance>>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsSpotBalance {
     pub(crate) coin: String,
     pub(crate) total: String,
     pub(crate) hold: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsLiquidation {
     pub(crate) liquidated_user: String,
     pub(crate) liquidated_ntl_pos: String,
     pub(crate) liquidated_account_value: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsUserFill {
     pub(crate) coin: String,
     pub(crate) px: String,
@@ -89,14 +89,14 @@ pub(crate) struct HyperliquidWsUserFill {
     pub(crate) cloid: Option<String>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsFunding {
     pub(crate) time: i64,
     pub(crate) coin: String,
     pub(crate) usdc: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsTrade {
     pub(crate) coin: String,
     pub(crate) side: String,
@@ -106,7 +106,7 @@ pub(crate) struct HyperliquidWsTrade {
     pub(crate) tid: i64,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsOrderUpdate {
     pub(crate) order: HyperliquidWsOrderInfo,
     pub(crate) status: String,
@@ -114,7 +114,7 @@ pub(crate) struct HyperliquidWsOrderUpdate {
     pub(crate) status_timestamp: i64,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HyperliquidWsOrderInfo {
     pub(crate) coin: String,
@@ -127,18 +127,18 @@ pub(crate) struct HyperliquidWsOrderInfo {
     pub(crate) cloid: Option<String>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsLedgerUpdates {
     pub(crate) updates: Vec<HyperliquidWsLedgerEntry>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsLedgerEntry {
     pub(crate) time: i64,
     pub(crate) delta: HyperliquidWsLedgerDelta,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsLedgerDelta {
     #[serde(rename = "type")]
     pub(crate) kind: String,
@@ -149,7 +149,7 @@ pub(crate) struct HyperliquidWsLedgerDelta {
 // Raw envelope — the first deserialization step for any WS text message
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub(crate) struct HyperliquidWsEnvelope {
     pub(crate) channel: String,
     #[serde(default)]
@@ -161,7 +161,7 @@ pub(crate) struct HyperliquidWsEnvelope {
 // ---------------------------------------------------------------------------
 
 /// One variant per Hyperliquid WS channel.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum HyperliquidWsInboundMessage {
     Pong,
     L2Book(HyperliquidWsBook),

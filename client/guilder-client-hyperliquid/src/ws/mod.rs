@@ -3,18 +3,12 @@
 /// - `inbound.rs` — `InboundMessage` enum, raw payload structs, conversion to guilder types
 /// - `outbound.rs` — `OutboundMessage` enum, JSON serialization
 /// - `transport.rs` — `WsTransport` trait + `HyperliquidWs` impl
-/// - `session.rs` — `WsSession` session management between client and transport
-/// - `sub_key.rs` — `SubKey` subscription routing key
-mod inbound;
-mod outbound;
-mod transport;
-mod session;
-mod sub_key;
+pub(crate) mod inbound;
+pub(crate) mod outbound;
+pub(crate) mod transport;
 
-pub(crate) use session::WsSession;
-pub(crate) use sub_key::SubKey;
 pub(crate) use outbound::HyperliquidWsOutboundMessage;
-pub(crate) use inbound::HyperliquidWsBook;
+pub(crate) use inbound::{HyperliquidWsBook, HyperliquidWsInboundMessage};
 
 use std::str::FromStr;
 

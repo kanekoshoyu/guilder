@@ -5,13 +5,14 @@
 use serde::Serialize;
 
 /// Cancel action for batch cancel orders via WS.
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 pub(crate) struct CancelAction {
     pub(crate) a: usize,
     pub(crate) o: i64,
 }
 
 /// One variant per client → server message type.
+#[derive(Clone, Debug)]
 pub(crate) enum HyperliquidWsOutboundMessage {
     /// Subscribe to an l2Book channel for a specific coin.
     SubscribeL2Book { coin: String },

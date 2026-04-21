@@ -40,6 +40,7 @@ use crate::ws::inbound::HyperliquidWsInboundMessage;
 use crate::ws::outbound::HyperliquidWsOutboundMessage;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tracing::info;
 
 const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
@@ -50,6 +51,9 @@ type TungsteniteStream =
 pub(crate) struct HyperliquidWs {
     url: String,
     stream: Option<TungsteniteStream>,
+    /// Set to true when the stream was closed/dropped — distinguishes
+    /// "never connected" from "was connected but lost".
+    closed: bool,
 }
 
 impl HyperliquidWs {
@@ -57,6 +61,7 @@ impl HyperliquidWs {
         Self {
             url: HYPERLIQUID_WS_URL.to_string(),
             stream: None,
+            closed: false,
         }
     }
 }
@@ -97,6 +102,7 @@ impl WsTransport for HyperliquidWs {
             .await
             .map_err(|e| WsError::Io(e.to_string()))?;
         self.stream = Some(ws);
+        self.closed = false;
         Ok(())
     }
 
@@ -109,25 +115,46 @@ impl WsTransport for HyperliquidWs {
             .map_err(|e| WsError::Io(e.to_string()))
     }
 
+    // somewhat stalled, find cause
     async fn recv(&mut self) -> Option<Result<Self::Inbound, Self::Error>> {
         let stream = self.stream.as_mut()?;
-        match stream.next().await {
-            None => Some(Err(WsError::Closed)),
-            Some(Err(e)) => Some(Err(WsError::Io(e.to_string()))),
-            Some(Ok(Message::Text(text))) => {
-                let Ok(env) =
-                    serde_json::from_str::<crate::ws::inbound::HyperliquidWsEnvelope>(&text)
-                else {
-                    return Some(Err(WsError::Parse(format!(
-                        "invalid envelope: {text:.100}"
-                    ))));
-                };
-                match HyperliquidWsInboundMessage::try_from(env) {
-                    Ok(msg) => Some(Ok(msg)),
-                    Err(e) => Some(Err(WsError::Parse(e.to_string()))),
+        loop {
+            info!("[transport] recv loop");
+            match stream.next().await {
+                None => {
+                    self.closed = true;
+                    return Some(Err(WsError::Closed));
                 }
+                Some(Err(e)) => {
+                    self.closed = true;
+                    return Some(Err(WsError::Io(e.to_string())));
+                }
+                Some(Ok(Message::Text(text))) => {
+                    let Ok(env) =
+                        serde_json::from_str::<crate::ws::inbound::HyperliquidWsEnvelope>(&text)
+                    else {
+                        return Some(Err(WsError::Parse(format!(
+                            "invalid envelope: {text:.100}"
+                        ))));
+                    };
+                    match HyperliquidWsInboundMessage::try_from(env) {
+                        Ok(msg) => return Some(Ok(msg)),
+                        Err(e) => return Some(Err(WsError::Parse(e.to_string()))),
+                    }
+                }
+                Some(Ok(Message::Ping(_))) => {
+                    // Tungstenite auto-responds to pongs; skip silently.
+                }
+                Some(Ok(Message::Pong(_))) => {}
+                Some(Ok(Message::Close(_))) => {
+                    self.closed = true;
+                    return Some(Err(WsError::Closed));
+                }
+                Some(Ok(Message::Binary(_))) => {
+                    // Unexpected on Hyperliquid WS; skip.
+                }
+                Some(Ok(Message::Frame(_))) => {}
             }
-            Some(Ok(_)) => None, // ping/pong/close/binary — skip and let caller retry
         }
     }
 
@@ -143,6 +170,6 @@ impl WsTransport for HyperliquidWs {
     }
 
     fn is_connected(&self) -> bool {
-        self.stream.is_some()
+        self.stream.is_some() && !self.closed
     }
 }

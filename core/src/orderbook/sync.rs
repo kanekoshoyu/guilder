@@ -86,7 +86,7 @@ pub(crate) async fn sync_loop<S, C>(
                         warn!("stream is cloed");
                         break;
                     };
-                     if symbol.eq("MEW") {
+                    if symbol.eq("MEW") {
                         info!("[OB sync_loop] new MEW message received!");
                     }
                     match result {
