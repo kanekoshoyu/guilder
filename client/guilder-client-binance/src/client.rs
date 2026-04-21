@@ -1,8 +1,8 @@
 use futures_util::stream;
 use guilder_abstraction::{
-    self, AssetContext, Balance, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation,
-    OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position, PredictedFunding,
-    TimeInForce, UserFill, UserRateLimit, Withdrawal,
+    self, AssetContext, Balance, BoxStream, Deposit, Fill, FundingPayment, L2Snapshot, L2Update,
+    Liquidation, OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position,
+    PredictedFunding, TimeInForce, UserFill, UserRateLimit, Withdrawal,
 };
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -74,7 +74,7 @@ impl guilder_abstraction::GetMarketData for BinanceClient {
         unimplemented!()
     }
 
-    async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
+    async fn get_l2_orderbook(&self, symbol: String) -> Result<L2Snapshot, String> {
         unimplemented!()
     }
 }
@@ -119,6 +119,10 @@ impl guilder_abstraction::ManageOrder for BinanceClient {
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketData for BinanceClient {
     fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
+        Box::pin(stream::pending())
+    }
+
+    fn subscribe_l2_snapshot(&self, symbol: String) -> BoxStream<Result<L2Snapshot, String>> {
         Box::pin(stream::pending())
     }
 

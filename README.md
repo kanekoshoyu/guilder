@@ -124,6 +124,11 @@ Never edit generated files directly — they are overwritten on each codegen run
 - Generated code depends only on the standard library (plus `futures-core` for `Stream`).
 - All traits are async. Subscription methods return `BoxStream` for object safety.
 - Reconnection is a client responsibility — WebSocket streams auto-reconnect so consumers see a logically persistent stream.
+- In `guilder-core`, shared orderbook maps intentionally use `RwLock<HashMap<...>>` so lock scopes stay explicit and we avoid unnecessary hidden guard-lifetime problems in core trading state.
+
+## Concurrency note
+
+For core shared trading state, Guilder intentionally prefers `RwLock<HashMap<...>>` over specialized concurrent-map crates. This keeps lock scopes explicit in the source, makes code review easier, and avoids subtle guard-lifetime bugs where a map entry handle can outlive the programmer's mental model.
 
 ## Why "Guilder"?
 

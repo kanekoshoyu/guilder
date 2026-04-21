@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 guilder-core = "0.2"
 
-# enable the live orderbook engine (pulls in tokio, dashmap, futures)
+# enable the live orderbook engine (pulls in tokio, futures)
 guilder-core = { version = "0.2", features = ["engine"] }
 ```
 
@@ -77,7 +77,7 @@ let imb = engine.imbalance("BTC", Some(10));           // top-10 level imbalance
 
 | Flag | Default | Description |
 |---|---|---|
-| `engine` | off | Enables `OrderbookEngine` with async runtime dependencies (`tokio`, `dashmap`, `futures`, `tokio-stream`, `rust_decimal`) |
+| `engine` | off | Enables `OrderbookEngine` with async runtime dependencies (`tokio`, `futures`, `tokio-stream`, `rust_decimal`) |
 
 The base crate (data structures only) depends on `guilder-abstraction` and `ordered-float` — nothing else.
 

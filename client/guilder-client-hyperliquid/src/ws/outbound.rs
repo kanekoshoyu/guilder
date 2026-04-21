@@ -27,9 +27,7 @@ pub(crate) enum HyperliquidWsOutboundMessage {
     /// Subscribe to the userNonFundingLedgerUpdates channel for a specific address.
     SubcribeNonFundingLedger { user_addr: String },
     /// Unsubscribe from any channel (channel + subscription JSON).
-    #[allow(dead_code)]
     Unsubscribe {
-        channel: String,
         subscription: serde_json::Value,
     },
     /// Keepalive ping.
@@ -78,27 +76,23 @@ impl HyperliquidWsOutboundMessage {
                 }
             })
             .to_string(),
-            HyperliquidWsOutboundMessage::SubscribeOrderUpdates { user_addr } => {
-                serde_json::json!({
-                    "method": "subscribe",
-                    "subscription": {
-                        "type": "orderUpdates",
-                        "user": user_addr,
-                    }
-                })
-                .to_string()
-            }
-            HyperliquidWsOutboundMessage::SubcribeNonFundingLedger { user_addr } => {
-                serde_json::json!({
-                    "method": "subscribe",
-                    "subscription": {
-                        "type": "userNonFundingLedgerUpdates",
-                        "user": user_addr,
-                    }
-                })
-                .to_string()
-            }
-            HyperliquidWsOutboundMessage::Unsubscribe { subscription, .. } => serde_json::json!({
+            HyperliquidWsOutboundMessage::SubscribeOrderUpdates { user_addr } => serde_json::json!({
+                "method": "subscribe",
+                "subscription": {
+                    "type": "orderUpdates",
+                    "user": user_addr,
+                }
+            })
+            .to_string(),
+            HyperliquidWsOutboundMessage::SubcribeNonFundingLedger { user_addr } => serde_json::json!({
+                "method": "subscribe",
+                "subscription": {
+                    "type": "userNonFundingLedgerUpdates",
+                    "user": user_addr,
+                }
+            })
+            .to_string(),
+            HyperliquidWsOutboundMessage::Unsubscribe { subscription } => serde_json::json!({
                 "method": "unsubscribe",
                 "subscription": subscription
             })

@@ -61,7 +61,7 @@ traits:
 
       - name: get_l2_orderbook
         description: get full L2 orderbook snapshot for a symbol (for initialization)
-        return_type: Result<Vec<L2Update>, String>
+        return_type: Result<L2Snapshot, String>
         args:
           - name: symbol
             type: String
@@ -122,6 +122,13 @@ traits:
       - name: subscribe_l2_update
         description: subscribe to L2 orderbook updates for a symbol
         return_type: Stream<Result<L2Update, String>>
+        args:
+          - name: symbol
+            type: String
+
+      - name: subscribe_l2_snapshot
+        description: subscribe to full L2 orderbook snapshots for a symbol
+        return_type: Stream<Result<L2Snapshot, String>>
         args:
           - name: symbol
             type: String
@@ -319,6 +326,26 @@ structs:
         type: Decimal
       - name: side
         type: Side
+      - name: sequence
+        type: i64
+
+  - name: L2Level
+    description: single price level within an L2 snapshot
+    values:
+      - name: price
+        type: Decimal
+      - name: volume
+        type: Decimal
+
+  - name: L2Snapshot
+    description: full L2 orderbook snapshot
+    values:
+      - name: symbol
+        type: String
+      - name: bids
+        type: Vec<L2Level>
+      - name: asks
+        type: Vec<L2Level>
       - name: sequence
         type: i64
 

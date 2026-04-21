@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<Vec<L2Update>, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<L2Snapshot, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -61,7 +61,7 @@ impl guilder_abstraction::GetMarketData for ExchangeClient {
         Err("not implemented".to_string())
     }
 
-    async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
+    async fn get_l2_orderbook(&self, symbol: String) -> Result<L2Snapshot, String> {
         Err("not implemented".to_string())
     }
 
@@ -92,6 +92,10 @@ impl guilder_abstraction::ManageOrder for ExchangeClient {
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketData for ExchangeClient {
     fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
+        Box::pin(stream::empty())
+    }
+
+    fn subscribe_l2_snapshot(&self, symbol: String) -> BoxStream<Result<L2Snapshot, String>> {
         Box::pin(stream::empty())
     }
 

@@ -5,10 +5,9 @@
 /// happens via the `as_*` methods below.
 use crate::ws::parse_decimal;
 use guilder_abstraction::{
-    AssetContext, Balance, Deposit, Fill, FundingPayment, L2Update, Liquidation, OrderSide,
-    OrderStatus, OrderUpdate, Side, UserFill, Withdrawal,
+    AssetContext, Balance, Deposit, Fill, FundingPayment, L2Level, L2Snapshot, Liquidation,
+    OrderSide, OrderStatus, OrderUpdate, UserFill, Withdrawal,
 };
-use serde::de::Error;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -156,6 +155,16 @@ pub(crate) struct HyperliquidWsEnvelope {
     pub(crate) data: Value,
 }
 
+#[derive(Deserialize, Clone, Debug)]
+pub(crate) struct HyperliquidWsSubscriptionResponse {
+    #[serde(default)]
+    pub(crate) method: Option<String>,
+    #[serde(default)]
+    pub(crate) subscription: Value,
+    #[serde(default)]
+    pub(crate) success: Option<bool>,
+}
+
 // ---------------------------------------------------------------------------
 // InboundMessage enum
 // ---------------------------------------------------------------------------
@@ -170,7 +179,8 @@ pub(crate) enum HyperliquidWsInboundMessage {
     User(HyperliquidWsUserEvent),
     OrderUpdates(Vec<HyperliquidWsOrderUpdate>),
     NonFundingLedger(HyperliquidWsLedgerUpdates),
-    SubscriptionResponse { success: bool },
+    SubscriptionResponse(HyperliquidWsSubscriptionResponse),
+    Unknown { channel: String, data: Value },
 }
 
 impl TryFrom<HyperliquidWsEnvelope> for HyperliquidWsInboundMessage {
@@ -187,18 +197,11 @@ impl TryFrom<HyperliquidWsEnvelope> for HyperliquidWsInboundMessage {
             "userNonFundingLedgerUpdates" => {
                 serde_json::from_value(env.data).map(Self::NonFundingLedger)
             }
-            "subscriptionResponse" => {
-                let success = env
-                    .data
-                    .get("success")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                Ok(Self::SubscriptionResponse { success })
-            }
-            _ => Err(serde_json::Error::custom(format!(
-                "unknown channel: {}",
-                env.channel
-            ))),
+            "subscriptionResponse" => serde_json::from_value(env.data).map(Self::SubscriptionResponse),
+            _ => Ok(Self::Unknown {
+                channel: env.channel,
+                data: env.data,
+            }),
         }
     }
 }
@@ -208,39 +211,41 @@ impl TryFrom<HyperliquidWsEnvelope> for HyperliquidWsInboundMessage {
 // ---------------------------------------------------------------------------
 
 impl HyperliquidWsInboundMessage {
-    /// Extract L2 orderbook updates. Only the `L2Book` variant returns Some.
-    pub fn as_l2_updates(&self) -> Option<Vec<L2Update>> {
+    /// Extract a full L2 orderbook snapshot. Only the `L2Book` variant returns Some.
+    pub fn as_l2_snapshot(&self) -> Option<L2Snapshot> {
         let HyperliquidWsInboundMessage::L2Book(book) = self else {
             return None;
         };
-        let mut result = Vec::new();
-        for level in book.levels.first().into_iter().flatten() {
-            if let (Some(price), Some(volume)) =
-                (parse_decimal(&level.px), parse_decimal(&level.sz))
-            {
-                result.push(L2Update {
-                    symbol: book.coin.clone(),
-                    price,
-                    volume,
-                    side: Side::Bid,
-                    sequence: book.time,
-                });
-            }
-        }
-        for level in book.levels.get(1).into_iter().flatten() {
-            if let (Some(price), Some(volume)) =
-                (parse_decimal(&level.px), parse_decimal(&level.sz))
-            {
-                result.push(L2Update {
-                    symbol: book.coin.clone(),
-                    price,
-                    volume,
-                    side: Side::Ask,
-                    sequence: book.time,
-                });
-            }
-        }
-        Some(result)
+        let bids = book
+            .levels
+            .first()
+            .into_iter()
+            .flatten()
+            .filter_map(|level| {
+                Some(L2Level {
+                    price: parse_decimal(&level.px)?,
+                    volume: parse_decimal(&level.sz)?,
+                })
+            })
+            .collect();
+        let asks = book
+            .levels
+            .get(1)
+            .into_iter()
+            .flatten()
+            .filter_map(|level| {
+                Some(L2Level {
+                    price: parse_decimal(&level.px)?,
+                    volume: parse_decimal(&level.sz)?,
+                })
+            })
+            .collect();
+        Some(L2Snapshot {
+            symbol: book.coin.clone(),
+            bids,
+            asks,
+            sequence: book.time,
+        })
     }
 
     /// Extract asset context. Only the `ActiveAssetCtx` variant returns Some.
@@ -488,7 +493,7 @@ impl HyperliquidWsInboundMessage {
     }
 
     /// Return the channel name for SubKey routing.
-    pub fn channel_name(&self) -> &'static str {
+    pub fn channel_name(&self) -> &str {
         match self {
             HyperliquidWsInboundMessage::Pong => "pong",
             HyperliquidWsInboundMessage::L2Book(_) => "l2Book",
@@ -497,7 +502,8 @@ impl HyperliquidWsInboundMessage {
             HyperliquidWsInboundMessage::User(_) => "user",
             HyperliquidWsInboundMessage::OrderUpdates(_) => "orderUpdates",
             HyperliquidWsInboundMessage::NonFundingLedger(_) => "userNonFundingLedgerUpdates",
-            HyperliquidWsInboundMessage::SubscriptionResponse { .. } => "subscriptionResponse",
+            HyperliquidWsInboundMessage::SubscriptionResponse(_) => "subscriptionResponse",
+            HyperliquidWsInboundMessage::Unknown { channel, .. } => channel,
         }
     }
 

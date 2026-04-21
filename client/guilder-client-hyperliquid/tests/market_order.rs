@@ -49,6 +49,8 @@ async fn test_market_order() {
             volume,
             OrderType::Market,
             TimeInForce::Gtc,
+            None,
+            false,
             Some(cloid),
         )
         .await;

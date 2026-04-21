@@ -53,16 +53,16 @@ async fn check_rest_asset_context(client: &HyperliquidClient) {
 /// WS: collect L2_SNAPSHOT_COUNT distinct snapshots (grouped by sequence number).
 /// Reports per-snapshot age relative to wall clock and gap between snapshots.
 async fn check_l2_freshness(client: &HyperliquidClient) {
-    println!("--- [2] WS subscribe_l2_update({SYMBOL}) — {L2_SNAPSHOT_COUNT} snapshots ---");
+    println!("--- [2] WS subscribe_l2_snapshot({SYMBOL}) — {L2_SNAPSHOT_COUNT} snapshots ---");
 
-    let mut stream = client.subscribe_l2_update(SYMBOL.to_string());
+    let mut stream = client.subscribe_l2_snapshot(SYMBOL.to_string());
     let mut prev_wall: Option<Instant> = None;
     let mut prev_seq: Option<i64> = None;
     let mut total_events = 0usize;
     let mut snapshots = 0usize;
 
     while snapshots < L2_SNAPSHOT_COUNT {
-        let event = match timeout(Duration::from_secs(10), stream.next()).await {
+        let snapshot = match timeout(Duration::from_secs(10), stream.next()).await {
             Ok(Some(Ok(e))) => e,
             Ok(Some(Err(e))) => {
                 println!("  ERROR: {e}");
@@ -79,15 +79,10 @@ async fn check_l2_freshness(client: &HyperliquidClient) {
         };
         total_events += 1;
 
-        // Only report when the sequence number changes (= new snapshot from the exchange)
-        if Some(event.sequence) == prev_seq {
-            continue;
-        }
-
         let wall_now = Instant::now();
-        let age_ms = now_ms() - event.sequence;
+        let age_ms = now_ms() - snapshot.sequence;
         let wall_gap = prev_wall.map(|p| wall_now.duration_since(p));
-        let seq_gap = prev_seq.map(|p| event.sequence - p);
+        let seq_gap = prev_seq.map(|p| snapshot.sequence - p);
 
         let wall_gap_str = wall_gap.map_or("    --   ".to_string(), |d| format!("{d:.0?}"));
         let seq_gap_str = seq_gap.map_or("   --  ".to_string(), |d| format!("{d:>6}ms"));
@@ -95,7 +90,7 @@ async fn check_l2_freshness(client: &HyperliquidClient) {
         println!(
             "  #{:02} seq={} age={:>5}ms wall_gap={:>8} seq_gap={}{}",
             snapshots + 1,
-            event.sequence,
+            snapshot.sequence,
             age_ms,
             wall_gap_str,
             seq_gap_str,
@@ -103,7 +98,7 @@ async fn check_l2_freshness(client: &HyperliquidClient) {
         );
 
         prev_wall = Some(wall_now);
-        prev_seq = Some(event.sequence);
+        prev_seq = Some(snapshot.sequence);
         snapshots += 1;
     }
 

@@ -1,12 +1,13 @@
 use crate::rate_limiter::{AddressRateLimiter, RestRateLimiter};
-use crate::ws::transport::{HyperliquidWs, WsTransport};
-use crate::ws::{HyperliquidWsBook, HyperliquidWsInboundMessage, HyperliquidWsOutboundMessage};
-use futures_util::stream;
-use futures_util::FutureExt;
+use crate::ws::manager::{
+    managed_stream, HyperliquidSubscription, HyperliquidWsManager, WsSendRateLimiter,
+};
+use crate::ws::{HyperliquidWsBook, HyperliquidWsInboundMessage};
+use futures_util::{stream, StreamExt};
 use guilder_abstraction::{
-    self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Update, Liquidation, OpenOrder,
-    OrderPlacement, OrderSide, OrderType, OrderUpdate, Position, PredictedFunding, Side,
-    TimeInForce, UserFill, Withdrawal,
+    self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Level, L2Snapshot, L2Update,
+    Liquidation, OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position,
+    PredictedFunding, TimeInForce, UserFill, Withdrawal,
 };
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -14,9 +15,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio::time::{self, Duration};
-use tracing::{info, warn};
+use std::sync::{Arc, RwLock};
 const HYPERLIQUID_INFO_URL: &str = "https://api.hyperliquid.xyz/info";
 const HYPERLIQUID_EXCHANGE_URL: &str = "https://api.hyperliquid.xyz/exchange";
 
@@ -51,6 +50,9 @@ pub struct HyperliquidClient {
     private_key: Option<String>,
     rest_limiter: Arc<RestRateLimiter>,
     address_limiter: Arc<AddressRateLimiter>,
+    market_ws_manager: HyperliquidWsManager,
+    user_ws_managers: Arc<RwLock<HashMap<String, HyperliquidWsManager>>>,
+    ws_send_limiter: WsSendRateLimiter,
 }
 
 impl Default for HyperliquidClient {
@@ -61,22 +63,30 @@ impl Default for HyperliquidClient {
 
 impl HyperliquidClient {
     pub fn new() -> Self {
+        let ws_send_limiter = WsSendRateLimiter::new();
         HyperliquidClient {
             client: Client::new(),
             user_address: None,
             private_key: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
+            user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
+            ws_send_limiter,
         }
     }
 
     pub fn with_auth(user_address: impl Into<String>, private_key: String) -> Self {
+        let ws_send_limiter = WsSendRateLimiter::new();
         HyperliquidClient {
             client: Client::new(),
             user_address: Some(user_address.into()),
             private_key: Some(private_key),
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
+            user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
+            ws_send_limiter,
         }
     }
 
@@ -833,8 +843,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     }
 
     /// Returns a full L2 orderbook snapshot for `symbol` from the l2Book REST endpoint.
-    /// Levels are returned as individual `L2Update` items; all share the same `sequence` (timestamp).
-    async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String> {
+    async fn get_l2_orderbook(&self, symbol: String) -> Result<L2Snapshot, String> {
         // l2Book → weight 2
         let resp = self
             .info_post(
@@ -846,36 +855,45 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
         let book: Option<HyperliquidWsBook> = parse_response(resp).await?;
         let book = match book {
             Some(b) => b,
-            None => return Ok(vec![]),
+            None => {
+                return Ok(L2Snapshot {
+                    symbol,
+                    bids: vec![],
+                    asks: vec![],
+                    sequence: 0,
+                })
+            }
         };
-        let mut levels = Vec::new();
-        for level in book.levels.first().into_iter().flatten() {
-            if let (Some(price), Some(volume)) =
-                (parse_decimal(&level.px), parse_decimal(&level.sz))
-            {
-                levels.push(L2Update {
-                    symbol: book.coin.clone(),
-                    price,
-                    volume,
-                    side: Side::Bid,
-                    sequence: book.time,
-                });
-            }
-        }
-        for level in book.levels.get(1).into_iter().flatten() {
-            if let (Some(price), Some(volume)) =
-                (parse_decimal(&level.px), parse_decimal(&level.sz))
-            {
-                levels.push(L2Update {
-                    symbol: book.coin.clone(),
-                    price,
-                    volume,
-                    side: Side::Ask,
-                    sequence: book.time,
-                });
-            }
-        }
-        Ok(levels)
+        let bids = book
+            .levels
+            .first()
+            .into_iter()
+            .flatten()
+            .filter_map(|level| {
+                Some(L2Level {
+                    price: parse_decimal(&level.px)?,
+                    volume: parse_decimal(&level.sz)?,
+                })
+            })
+            .collect();
+        let asks = book
+            .levels
+            .get(1)
+            .into_iter()
+            .flatten()
+            .filter_map(|level| {
+                Some(L2Level {
+                    price: parse_decimal(&level.px)?,
+                    volume: parse_decimal(&level.sz)?,
+                })
+            })
+            .collect();
+        Ok(L2Snapshot {
+            symbol: book.coin,
+            bids,
+            asks,
+            sequence: book.time,
+        })
     }
 
     /// Returns the mid-price of `symbol` (e.g. "BTC") from allMids.
@@ -1309,19 +1327,32 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeL2Book { coin: symbol.clone() };
-        Box::pin(ws_stream_with_reconnect(sub_msg, move |msg: HyperliquidWsInboundMessage| {
-            if let Some(updates) = msg.as_l2_updates() {
-                updates.into_iter().map(Ok).collect()
-            } else {
-                vec![]
-            }
-        }))
+        Box::pin(stream::iter(vec![Err(format!(
+            "subscribe_l2_update is unsupported for {symbol}; use subscribe_l2_snapshot"
+        ))]))
+    }
+
+    fn subscribe_l2_snapshot(&self, symbol: String) -> BoxStream<Result<L2Snapshot, String>> {
+        let subscription = HyperliquidSubscription::L2Book { coin: symbol };
+        Box::pin(managed_stream(
+            self.market_ws_manager.clone(),
+            subscription,
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(snapshot) = msg.as_l2_snapshot() {
+                    vec![Ok(snapshot)]
+                } else {
+                    vec![]
+                }
+            },
+        ))
     }
 
     fn subscribe_asset_context(&self, symbol: String) -> BoxStream<Result<AssetContext, String>> {
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeActiveAssetCtx { coin: symbol };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
+        let subscription = HyperliquidSubscription::ActiveAssetCtx { coin: symbol };
+        Box::pin(managed_stream(
+            self.market_ws_manager.clone(),
+            subscription,
+            |msg: HyperliquidWsInboundMessage| {
             if let Some(ctx) = msg.as_asset_context() {
                 vec![Ok(ctx)]
             } else {
@@ -1331,19 +1362,26 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     }
 
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>> {
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeUserEvents { user_addr: user };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(liq) = msg.as_liquidation() {
-                vec![Ok(liq)]
-            } else {
-                vec![]
-            }
-        }))
+        subscribe_user_stream(
+            self,
+            user.clone(),
+            HyperliquidSubscription::UserEvents { user_addr: user },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(liq) = msg.as_liquidation() {
+                    vec![Ok(liq)]
+                } else {
+                    vec![]
+                }
+            },
+        )
     }
 
     fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>> {
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeTrades { coin: symbol };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
+        let subscription = HyperliquidSubscription::Trades { coin: symbol };
+        Box::pin(managed_stream(
+            self.market_ws_manager.clone(),
+            subscription,
+            |msg: HyperliquidWsInboundMessage| {
             if let Some(fills) = msg.as_trades() {
                 fills.into_iter().map(Ok).collect()
             } else {
@@ -1351,6 +1389,49 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
             }
         }))
     }
+}
+
+fn subscribe_user_stream<T, F>(
+    client: &HyperliquidClient,
+    user_addr: String,
+    subscription: HyperliquidSubscription,
+    parse: F,
+) -> BoxStream<Result<T, String>>
+where
+    T: Send + 'static,
+    F: Fn(HyperliquidWsInboundMessage) -> Vec<Result<T, String>> + Send + Sync + 'static,
+{
+    let manager = get_or_create_user_manager(
+        &client.user_ws_managers,
+        client.ws_send_limiter.clone(),
+        user_addr,
+    );
+    Box::pin(async_stream::stream! {
+        let stream = managed_stream(manager, subscription, parse);
+        tokio::pin!(stream);
+        while let Some(item) = stream.next().await {
+            yield item;
+        }
+    })
+}
+
+fn get_or_create_user_manager(
+    user_ws_managers: &RwLock<HashMap<String, HyperliquidWsManager>>,
+    ws_send_limiter: WsSendRateLimiter,
+    user_addr: String,
+) -> HyperliquidWsManager {
+    {
+        let managers = user_ws_managers.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(manager) = managers.get(&user_addr) {
+            return manager.clone();
+        }
+    }
+
+    let mut managers = user_ws_managers.write().unwrap_or_else(|e| e.into_inner());
+    managers
+        .entry(user_addr.clone())
+        .or_insert_with(|| HyperliquidWsManager::new(Some(user_addr), ws_send_limiter))
+        .clone()
 }
 
 #[allow(async_fn_in_trait)]
@@ -1570,16 +1651,20 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 "user address not registered".to_string()
             )]));
         };
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeUserEvents {
-            user_addr: addr.clone(),
-        };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(fills) = msg.as_user_fills() {
-                fills.into_iter().map(Ok).collect()
-            } else {
-                vec![]
-            }
-        }))
+        subscribe_user_stream(
+            self,
+            addr.clone(),
+            HyperliquidSubscription::UserEvents {
+                user_addr: addr.clone(),
+            },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(fills) = msg.as_user_fills() {
+                    fills.into_iter().map(Ok).collect()
+                } else {
+                    vec![]
+                }
+            },
+        )
     }
 
     fn subscribe_order_updates(&self) -> BoxStream<Result<OrderUpdate, String>> {
@@ -1588,16 +1673,20 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 "user address not registered".to_string()
             )]));
         };
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeOrderUpdates {
-            user_addr: addr.clone(),
-        };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(updates) = msg.as_order_updates() {
-                updates.into_iter().map(Ok).collect()
-            } else {
-                vec![]
-            }
-        }))
+        subscribe_user_stream(
+            self,
+            addr.clone(),
+            HyperliquidSubscription::OrderUpdates {
+                user_addr: addr.clone(),
+            },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(updates) = msg.as_order_updates() {
+                    updates.into_iter().map(Ok).collect()
+                } else {
+                    vec![]
+                }
+            },
+        )
     }
 
     fn subscribe_funding_payments(&self) -> BoxStream<Result<FundingPayment, String>> {
@@ -1606,16 +1695,20 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 "user address not registered".to_string()
             )]));
         };
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeUserEvents {
-            user_addr: addr.clone(),
-        };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(p) = msg.as_funding_payment() {
-                vec![Ok(p)]
-            } else {
-                vec![]
-            }
-        }))
+        subscribe_user_stream(
+            self,
+            addr.clone(),
+            HyperliquidSubscription::UserEvents {
+                user_addr: addr.clone(),
+            },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(p) = msg.as_funding_payment() {
+                    vec![Ok(p)]
+                } else {
+                    vec![]
+                }
+            },
+        )
     }
 
     fn subscribe_deposits(&self) -> BoxStream<Result<Deposit, String>> {
@@ -1624,16 +1717,20 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 "user address not registered".to_string()
             )]));
         };
-        let sub_msg = HyperliquidWsOutboundMessage::SubcribeNonFundingLedger {
-            user_addr: addr.clone(),
-        };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(deps) = msg.as_deposits() {
-                deps.into_iter().map(Ok).collect()
-            } else {
-                vec![]
-            }
-        }))
+        subscribe_user_stream(
+            self,
+            addr.clone(),
+            HyperliquidSubscription::NonFundingLedger {
+                user_addr: addr.clone(),
+            },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(deps) = msg.as_deposits() {
+                    deps.into_iter().map(Ok).collect()
+                } else {
+                    vec![]
+                }
+            },
+        )
     }
 
     fn subscribe_withdrawals(&self) -> BoxStream<Result<Withdrawal, String>> {
@@ -1642,16 +1739,20 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 "user address not registered".to_string()
             )]));
         };
-        let sub_msg = HyperliquidWsOutboundMessage::SubcribeNonFundingLedger {
-            user_addr: addr.clone(),
-        };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(wds) = msg.as_withdrawals() {
-                wds.into_iter().map(Ok).collect()
-            } else {
-                vec![]
-            }
-        }))
+        subscribe_user_stream(
+            self,
+            addr.clone(),
+            HyperliquidSubscription::NonFundingLedger {
+                user_addr: addr.clone(),
+            },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(wds) = msg.as_withdrawals() {
+                    wds.into_iter().map(Ok).collect()
+                } else {
+                    vec![]
+                }
+            },
+        )
     }
 
     /// Subscribe to spot wallet balance updates for the registered user address.
@@ -1671,86 +1772,18 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
         &self,
         address: String,
     ) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
-        let sub_msg = HyperliquidWsOutboundMessage::SubscribeUserEvents {
-            user_addr: address,
-        };
-        Box::pin(ws_stream_with_reconnect(sub_msg, |msg: HyperliquidWsInboundMessage| {
-            if let Some(balances) = msg.as_spot_balance() {
-                vec![Ok(balances)]
-            } else {
-                vec![]
-            }
-        }))
-    }
-}
-
-/// Self-contained WS subscription stream with reconnect logic.
-///
-/// Each stream owns its own `HyperliquidWs` connection. On disconnect or
-/// recv timeout (60s), it exponentially backs off and re-subscribes.
-/// Panics in the recv loop are caught and treated as disconnects.
-fn ws_stream_with_reconnect<T>(
-    sub_msg: HyperliquidWsOutboundMessage,
-    parse: impl Fn(HyperliquidWsInboundMessage) -> Vec<Result<T, String>> + Send + 'static,
-) -> impl futures_util::Stream<Item = Result<T, String>> + Send + 'static
-where
-    T: Send + 'static,
-{
-    async_stream::stream! {
-        let mut ws = HyperliquidWs::new();
-        let mut delay_secs: u64 = 1;
-
-        loop {
-            // --- Connect + subscribe ---
-            if let Err(e) = ws.connect().await {
-                warn!(error = ?e, "WS connect failed, backing off");
-                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
-                delay_secs = (delay_secs * 2).min(30);
-                continue;
-            }
-            if let Err(e) = ws.send(sub_msg.clone()).await {
-                warn!(error = ?e, "WS subscribe failed, backing off");
-                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
-                delay_secs = (delay_secs * 2).min(30);
-                continue;
-            }
-
-            // Reset backoff on successful connect+subscribe.
-            delay_secs = 1;
-
-            info!(?sub_msg, "WS subscription active");
-
-            // --- Read loop ---
-            loop {
-                let recv_fut: std::pin::Pin<Box<dyn std::future::Future<Output = Result<HyperliquidWsInboundMessage, String>> + Send>> = Box::pin(async {
-                    let result = std::panic::AssertUnwindSafe(ws.recv())
-                        .catch_unwind()
-                        .await;
-                    match result {
-                        Ok(Some(Ok(m))) => Ok(m),
-                        Ok(Some(Err(e))) => Err(e.to_string()),
-                        Ok(None) => Err("WS stream ended".to_string()),
-                        Err(_panic) => Err("WS recv panicked".to_string()),
-                    }
-                });
-
-                match time::timeout(Duration::from_secs(60), recv_fut).await {
-                    Ok(Ok(msg)) => {
-                        for item in parse(msg) {
-                            yield item;
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        warn!(error = %e, "WS recv error, reconnecting");
-                        break;
-                    }
-                    Err(_) => {
-                        warn!("WS recv timeout (60s), reconnecting");
-                        break;
-                    }
+        subscribe_user_stream(
+            self,
+            address.clone(),
+            HyperliquidSubscription::UserEvents { user_addr: address },
+            |msg: HyperliquidWsInboundMessage| {
+                if let Some(balances) = msg.as_spot_balance() {
+                    vec![Ok(balances)]
+                } else {
+                    vec![]
                 }
-            }
-        }
+            },
+        )
     }
 }
 

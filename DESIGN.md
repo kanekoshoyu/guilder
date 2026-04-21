@@ -46,7 +46,7 @@ Domain models that don't depend on any exchange:
 
 Live orderbook sync engine. Takes any client that implements `GetMarketData + SubscribeMarketData`, snapshots orderbooks, then streams incremental L2 updates with sequence-gap detection and automatic re-snapshot on errors.
 
-The engine feature pulls in heavier async dependencies (`tokio`, `dashmap`, `futures`, `tokio-stream`), so it is opt-in.
+The engine feature pulls in heavier async dependencies (`tokio`, `futures`, `tokio-stream`), so it is opt-in.
 
 ## guilder-client-*
 
@@ -83,3 +83,6 @@ Asks are iterated lowest-first, bids highest-first. `BTreeMap` gives sorted iter
 
 ### Why reconnection lives in clients, not the engine?
 Each exchange has different reconnection quirks (rate limits, auth refresh, sequence resets). Pushing reconnection into the client keeps the engine and strategies generic.
+
+### Why `RwLock<HashMap<...>>` for shared core state?
+For shared orderbook state in `guilder-core`, Guilder intentionally prefers `RwLock<HashMap<...>>` over specialized concurrent-map crates. The goal is not maximum theoretical concurrency; it is explicit lock scope, easier reasoning during code review, and avoiding subtle guard-lifetime bugs in critical trading state.

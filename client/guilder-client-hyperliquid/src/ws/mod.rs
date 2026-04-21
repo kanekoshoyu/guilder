@@ -4,6 +4,7 @@
 /// - `outbound.rs` — `OutboundMessage` enum, JSON serialization
 /// - `transport.rs` — `WsTransport` trait + `HyperliquidWs` impl
 pub(crate) mod inbound;
+pub(crate) mod manager;
 pub(crate) mod outbound;
 pub(crate) mod transport;
 

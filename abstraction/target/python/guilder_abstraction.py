@@ -65,6 +65,20 @@ class L2Update:
 		self.side = side
 		self.sequence = sequence
 
+class L2Level:
+	"""single price level within an L2 snapshot"""
+	def __init__(self, price: str, volume: str):
+		self.price = price
+		self.volume = volume
+
+class L2Snapshot:
+	"""full L2 orderbook snapshot"""
+	def __init__(self, symbol: str, bids: list[L2Level], asks: list[L2Level], sequence: int):
+		self.symbol = symbol
+		self.bids = bids
+		self.asks = asks
+		self.sequence = sequence
+
 class Liquidation:
 	"""forced liquidation event"""
 	def __init__(self, symbol: str, side: OrderSide, liquidated_user: str, notional_position: str, account_value: str):
@@ -259,7 +273,7 @@ class GetMarketData(ABC):
 		pass
 
 	@abstractmethod
-	async def get_l2_orderbook(self, symbol: str) -> Result<Vec<L2Update>, String>:
+	async def get_l2_orderbook(self, symbol: str) -> Result<L2Snapshot, String>:
 		"""get full L2 orderbook snapshot for a symbol (for initialization)"""
 		pass
 
@@ -292,6 +306,11 @@ class SubscribeMarketData(ABC):
 	@abstractmethod
 	async def subscribe_l2_update(self, symbol: str) -> AsyncIterator[Result<L2Update, String>]:
 		"""subscribe to L2 orderbook updates for a symbol"""
+		pass
+
+	@abstractmethod
+	async def subscribe_l2_snapshot(self, symbol: str) -> AsyncIterator[Result<L2Snapshot, String>]:
+		"""subscribe to full L2 orderbook snapshots for a symbol"""
 		pass
 
 	@abstractmethod

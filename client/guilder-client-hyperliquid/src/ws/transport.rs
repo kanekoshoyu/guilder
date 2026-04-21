@@ -40,8 +40,6 @@ use crate::ws::inbound::HyperliquidWsInboundMessage;
 use crate::ws::outbound::HyperliquidWsOutboundMessage;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::info;
-
 const HYPERLIQUID_WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
 type TungsteniteStream =
@@ -119,7 +117,6 @@ impl WsTransport for HyperliquidWs {
     async fn recv(&mut self) -> Option<Result<Self::Inbound, Self::Error>> {
         let stream = self.stream.as_mut()?;
         loop {
-            info!("[transport] recv loop");
             match stream.next().await {
                 None => {
                     self.closed = true;

@@ -13,7 +13,7 @@ async fn test_l2_stream_delivers_multiple_events() {
     const TIME_LIMIT: Duration = Duration::from_secs(15);
 
     let client = HyperliquidClient::new();
-    let mut stream = client.subscribe_l2_update("BTC".to_string());
+    let mut stream = client.subscribe_l2_snapshot("BTC".to_string());
     let mut ok_count = 0;
 
     let result = timeout(TIME_LIMIT, async {
@@ -21,7 +21,11 @@ async fn test_l2_stream_delivers_multiple_events() {
             match item {
                 Ok(event) => {
                     assert_eq!(event.symbol, "BTC");
-                    assert!(event.price > Decimal::ZERO, "price should be positive");
+                    assert!(!event.bids.is_empty() || !event.asks.is_empty(), "snapshot should not be empty");
+                    assert!(
+                        event.bids.first().map(|level| level.price > Decimal::ZERO).unwrap_or(true),
+                        "bid price should be positive"
+                    );
                     ok_count += 1;
                     if ok_count >= REQUIRED_EVENTS {
                         break;
@@ -49,7 +53,7 @@ async fn test_stream_continues_after_errors() {
     const TIME_LIMIT: Duration = Duration::from_secs(20);
 
     let client = HyperliquidClient::new();
-    let mut stream = client.subscribe_l2_update("BTC".to_string());
+    let mut stream = client.subscribe_l2_snapshot("BTC".to_string());
 
     let mut ok_count = 0;
     let mut err_count = 0;
@@ -93,7 +97,7 @@ async fn test_reconnect_via_new_subscription() {
 
     // First subscription — receive one event then drop.
     {
-        let mut stream = client.subscribe_l2_update("BTC".to_string());
+        let mut stream = client.subscribe_l2_snapshot("BTC".to_string());
         let first = timeout(Duration::from_secs(5), stream.next())
             .await
             .expect("timed out on first subscription")
@@ -103,7 +107,7 @@ async fn test_reconnect_via_new_subscription() {
     // stream is dropped here
 
     // Second subscription — should connect fresh with no leftover state.
-    let mut stream2 = client.subscribe_l2_update("BTC".to_string());
+    let mut stream2 = client.subscribe_l2_snapshot("BTC".to_string());
     let second = timeout(TIME_LIMIT, async {
         loop {
             match stream2.next().await {
@@ -119,5 +123,5 @@ async fn test_reconnect_via_new_subscription() {
     assert!(second.is_some(), "second subscription yielded no events");
     let event = second.unwrap();
     assert_eq!(event.symbol, "BTC");
-    assert!(event.price > Decimal::ZERO);
+    assert!(!event.bids.is_empty() || !event.asks.is_empty());
 }

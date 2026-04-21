@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, Semaphore};
-use tracing::{debug, info, warn};
+use tracing::warn;
 
-use super::convert::apply_update;
+use super::convert::apply_snapshot;
 use super::error::EngineError;
 use super::storage::PriceLevelStorage;
 use super::sync::sync_loop;
@@ -63,8 +63,8 @@ where
     S: PriceLevelStorage + Default + Send + 'static,
 {
     client: Arc<C>,
-    books: Arc<DashMap<String, Orderbook<S>>>,
-    last_updated: Arc<DashMap<String, DateTime<Utc>>>,
+    books: Arc<RwLock<HashMap<String, Orderbook<S>>>>,
+    last_updated: Arc<RwLock<HashMap<String, DateTime<Utc>>>>,
     add_tx: mpsc::UnboundedSender<Vec<String>>,
     add_rx: Mutex<Option<mpsc::UnboundedReceiver<Vec<String>>>>,
     update_tx: broadcast::Sender<BookUpdate>,
@@ -81,7 +81,7 @@ where
     /// Total number of corrections applied (book replaced).
     pub total_corrections: Arc<AtomicU64>,
     /// Per-symbol reconciliation health — written by reconcile loop, read by handle.
-    reconciliation_health: Arc<DashMap<String, ReconciliationHealth>>,
+    reconciliation_health: Arc<RwLock<HashMap<String, ReconciliationHealth>>>,
 }
 
 /// Maximum number of concurrent REST snapshot requests to avoid rate-limiting.
@@ -97,8 +97,8 @@ where
         let (update_tx, _) = broadcast::channel(4096);
         OrderbookEngine {
             client: Arc::new(client),
-            books: Arc::new(DashMap::new()),
-            last_updated: Arc::new(DashMap::new()),
+            books: Arc::new(RwLock::new(HashMap::new())),
+            last_updated: Arc::new(RwLock::new(HashMap::new())),
             add_tx,
             add_rx: Mutex::new(Some(add_rx)),
             update_tx,
@@ -107,7 +107,7 @@ where
             reconciliation_interval: None,
             total_drifts: Arc::new(AtomicU64::new(0)),
             total_corrections: Arc::new(AtomicU64::new(0)),
-            reconciliation_health: Arc::new(DashMap::new()),
+            reconciliation_health: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -160,7 +160,7 @@ where
             return;
         };
 
-        let books: Arc<DashMap<String, Orderbook<S>>> = Arc::clone(&self.books);
+        let books = Arc::clone(&self.books);
         let last_updated = Arc::clone(&self.last_updated);
         let client = Arc::clone(&self.client);
         let rest_semaphore = Arc::clone(&self.rest_semaphore);
@@ -175,7 +175,12 @@ where
                 ticker.tick().await;
 
                 // Collect snapshot of current symbols to reconcile.
-                let symbols: Vec<String> = books.iter().map(|e| e.key().clone()).collect();
+                let symbols: Vec<String> = books
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keys()
+                    .cloned()
+                    .collect();
                 if symbols.is_empty() {
                     continue;
                 }
@@ -185,7 +190,10 @@ where
                     {
                         Some(s) => s,
                         None => {
-                            health.insert(
+                            health
+                                .write()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(
                                 symbol.clone(),
                                 ReconciliationHealth {
                                     drift_detected: false,
@@ -198,21 +206,27 @@ where
                         }
                     };
 
-                    // Compare local vs REST.
-                    let local = books.get(symbol);
-                    let (mismatches, needs_replace) = match &local {
-                        Some(entry) => {
-                            compare_books(entry.value(), &rest_snapshot)
+                    // Compare local vs REST. Keep the read guard scoped to this
+                    // block so it is definitely dropped before any later
+                    // `books.insert(...)`; we intentionally use
+                    // `RwLock<HashMap<...>>` here because the explicit lock
+                    // scopes are easier to reason about than hidden guard
+                    // lifetimes for this shared orderbook state.
+                    let (mismatches, needs_replace) = {
+                        let books = books.read().unwrap_or_else(|e| e.into_inner());
+                        match books.get(symbol) {
+                            Some(entry) => compare_books(entry, &rest_snapshot),
+                            None => (0, true),
                         }
-                        None => (0, true),
                     };
 
                     let corrected = if needs_replace {
                         let mut book: Orderbook<S> = Orderbook::default();
-                        for update in &rest_snapshot {
-                            apply_update(&mut book, update);
-                        }
-                        books.insert(symbol.clone(), book);
+                        apply_snapshot(&mut book, &rest_snapshot);
+                        books
+                            .write()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(symbol.clone(), book);
                         true
                     } else {
                         false
@@ -222,7 +236,10 @@ where
                     // (correction or clean match) — this prevents the staleness
                     // gate from rejecting low-activity coins that haven't seen
                     // a WS message recently.
-                    last_updated.insert(symbol.clone(), Utc::now());
+                    last_updated
+                        .write()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(symbol.clone(), Utc::now());
 
                     if mismatches > 0 {
                         total_drifts.fetch_add(1, Ordering::Relaxed);
@@ -231,7 +248,10 @@ where
                         total_corrections.fetch_add(1, Ordering::Relaxed);
                     }
 
-                    health.insert(
+                    health
+                        .write()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(
                         symbol.clone(),
                         ReconciliationHealth {
                             drift_detected: mismatches > 0,
@@ -248,8 +268,10 @@ where
     /// Per-symbol reconciliation health (serialisable view).
     pub fn reconciliation_health(&self) -> Vec<(String, ReconciliationHealthView)> {
         self.reconciliation_health
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .map(|e| (e.key().clone(), e.value().view()))
+            .map(|(symbol, health)| (symbol.clone(), health.view()))
             .collect()
     }
 
@@ -276,8 +298,10 @@ where
                 let now = Utc::now();
 
                 let entries: Vec<_> = last_updated
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
                     .iter()
-                    .map(|e| (e.key().clone(), *e.value()))
+                    .map(|(symbol, ts)| (symbol.clone(), *ts))
                     .collect();
 
                 if entries.is_empty() {
@@ -295,21 +319,10 @@ where
                         );
                     }
 
-                    debug!(
-                        symbol = symbol,
-                        wall_age_secs = age.num_seconds(),
-                        exchange_ts = ts.timestamp_millis(),
-                        "orderbook staleness check"
-                    );
                 }
             }
         });
 
-        info!(
-            max_wall_age_ms = max_wall_age.as_millis(),
-            check_interval_ms = check_interval.as_millis(),
-            "staleness monitor spawned"
-        );
     }
 
     /// Subscribe to a specific set of symbols and block, syncing orderbooks.
@@ -317,6 +330,7 @@ where
         if !self.skip_initial_snapshot {
             self.snapshot_symbols(&symbols).await?;
         }
+
 
         let mut futures: Vec<_> = symbols
             .into_iter()
@@ -364,7 +378,7 @@ where
                                 )));
                             }
                         }
-                        None => break, // channel closed
+                        None => break,
                     }
                 } else {
                     break;
@@ -378,6 +392,10 @@ where
                     result = futures::future::select_all(&mut futures) => {
                         let (_, idx, _) = result;
                         let _ = futures.remove(idx);
+                        warn!(
+                            active_sync_loops = futures.len(),
+                            "orderbook sync_loop finished and was removed from track loop"
+                        );
                     }
                     msg = rx.recv() => {
                         match msg {
@@ -405,11 +423,17 @@ where
                     }
                 }
             } else {
-                let (_, _, remaining) = futures::future::select_all(futures).await;
-                futures = remaining;
+                let result = futures::future::select_all(&mut futures).await;
+                let (_, idx, _) = result;
+                let _ = futures.remove(idx);
+                warn!(
+                    active_sync_loops = futures.len(),
+                    "orderbook sync_loop finished and was removed from track loop"
+                );
             }
         }
 
+        warn!("orderbook track loop exited");
         Ok(())
     }
 
@@ -441,11 +465,15 @@ where
         for result in results {
             let (sym, snapshot) = result?;
             let mut book: Orderbook<S> = Orderbook::default();
-            for update in &snapshot {
-                apply_update(&mut book, update);
-            }
-            self.books.insert(sym.clone(), book);
-            self.last_updated.insert(sym, Utc::now());
+            apply_snapshot(&mut book, &snapshot);
+            self.books
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(sym.clone(), book);
+            self.last_updated
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(sym, Utc::now());
         }
 
         Ok(())
@@ -454,33 +482,42 @@ where
     /// Returns the top `depth` levels per side for a symbol.
     /// If `depth` is `None`, returns all levels.
     pub fn snapshot(&self, symbol: &str, depth: Option<usize>) -> Option<Vec<(Side, Decimal, Decimal)>> {
-        let book = self.books.get(symbol)?;
+        let books = self.books.read().unwrap_or_else(|e| e.into_inner());
+        let book = books.get(symbol)?;
         Some(book.snapshot(depth))
     }
 
     /// Last exchange timestamp for this symbol's orderbook.
     pub fn last_updated(&self, symbol: &str) -> Option<DateTime<Utc>> {
-        self.last_updated.get(symbol).map(|r| *r.value())
+        self.last_updated
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(symbol)
+            .copied()
     }
 
     /// Health status for all tracked symbols: `(symbol, last_exchange_timestamp)`.
     pub fn health(&self) -> Vec<(String, DateTime<Utc>)> {
         self.last_updated
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .map(|entry| (entry.key().clone(), *entry.value()))
+            .map(|(symbol, ts)| (symbol.clone(), *ts))
             .collect()
     }
 
     /// Quote-currency liquidity within a slippage boundary on one side.
     pub fn liquidity(&self, symbol: &str, side: Side, slippage_pct: f64) -> Option<Decimal> {
-        let book = self.books.get(symbol)?;
+        let books = self.books.read().unwrap_or_else(|e| e.into_inner());
+        let book = books.get(symbol)?;
         book.liquidity(side, slippage_pct)
     }
 
     /// Liquidity imbalance ratio `(B - A) / (B + A)`.
     /// `top_n` limits to top N levels per side; `None` uses the full book.
     pub fn imbalance(&self, symbol: &str, top_n: Option<usize>) -> Option<f64> {
-        let book = self.books.get(symbol)?;
+        let books = self.books.read().unwrap_or_else(|e| e.into_inner());
+        let book = books.get(symbol)?;
         book.imbalance(top_n)
     }
 }
@@ -495,7 +532,7 @@ async fn fetch_rest_book<C>(
     client: &C,
     rest_semaphore: &Semaphore,
     symbol: &str,
-) -> Option<Vec<guilder_abstraction::L2Update>>
+) -> Option<guilder_abstraction::L2Snapshot>
 where
     C: GetMarketData,
 {
@@ -510,7 +547,7 @@ where
 /// every tick, not incremental diffs.
 fn compare_books<S: PriceLevelStorage>(
     local: &Orderbook<S>,
-    rest_snapshot: &[guilder_abstraction::L2Update],
+    rest_snapshot: &guilder_abstraction::L2Snapshot,
 ) -> (usize, bool) {
     let local_levels = local.snapshot(None);
 
@@ -529,14 +566,15 @@ fn compare_books<S: PriceLevelStorage>(
     local_sorted.sort_by_key(|(s, p, _)| (*s, *p));
 
     let mut rest_sorted: Vec<(u8, Decimal, Decimal)> = rest_snapshot
+        .bids
         .iter()
-        .map(|u| {
-            let side_tag = match u.side {
-                Side::Bid => 0u8,
-                Side::Ask => 1u8,
-            };
-            (side_tag, u.price, u.volume)
-        })
+        .map(|level| (0u8, level.price, level.volume))
+        .chain(
+            rest_snapshot
+                .asks
+                .iter()
+                .map(|level| (1u8, level.price, level.volume)),
+        )
         .collect();
     rest_sorted.sort_by_key(|(s, p, _)| (*s, *p));
 
@@ -580,12 +618,21 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec;
 
-    fn make_update(symbol: &str, price: Decimal, volume: Decimal, side: Side) -> guilder_abstraction::L2Update {
-        guilder_abstraction::L2Update {
+    fn make_snapshot(
+        symbol: &str,
+        bids: Vec<(Decimal, Decimal)>,
+        asks: Vec<(Decimal, Decimal)>,
+    ) -> guilder_abstraction::L2Snapshot {
+        guilder_abstraction::L2Snapshot {
             symbol: symbol.to_string(),
-            price,
-            volume,
-            side,
+            bids: bids
+                .into_iter()
+                .map(|(price, volume)| guilder_abstraction::L2Level { price, volume })
+                .collect(),
+            asks: asks
+                .into_iter()
+                .map(|(price, volume)| guilder_abstraction::L2Level { price, volume })
+                .collect(),
             sequence: 0,
         }
     }
@@ -596,10 +643,7 @@ mod tests {
         book.update_bid(dec!(100), dec!(10));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = vec![
-            make_update("BTC", dec!(101), dec!(5), Side::Ask),
-            make_update("BTC", dec!(100), dec!(10), Side::Bid),
-        ];
+        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(10))], vec![(dec!(101), dec!(5))]);
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 0);
@@ -612,10 +656,7 @@ mod tests {
         book.update_bid(dec!(100), dec!(10));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = vec![
-            make_update("BTC", dec!(101), dec!(5), Side::Ask),
-            make_update("BTC", dec!(100), dec!(8), Side::Bid), // volume changed
-        ];
+        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(8))], vec![(dec!(101), dec!(5))]);
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 1);
@@ -629,11 +670,7 @@ mod tests {
         book.update_bid(dec!(99), dec!(5));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = vec![
-            make_update("BTC", dec!(101), dec!(5), Side::Ask),
-            make_update("BTC", dec!(100), dec!(10), Side::Bid),
-            // level at 99 removed
-        ];
+        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(10))], vec![(dec!(101), dec!(5))]);
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 1);
@@ -646,11 +683,11 @@ mod tests {
         book.update_bid(dec!(100), dec!(10));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = vec![
-            make_update("BTC", dec!(101), dec!(5), Side::Ask),
-            make_update("BTC", dec!(100), dec!(10), Side::Bid),
-            make_update("BTC", dec!(99), dec!(3), Side::Bid), // new level
-        ];
+        let rest = make_snapshot(
+            "BTC",
+            vec![(dec!(100), dec!(10)), (dec!(99), dec!(3))],
+            vec![(dec!(101), dec!(5))],
+        );
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 1);
@@ -660,10 +697,7 @@ mod tests {
     #[test]
     fn test_compare_books_empty_local() {
         let book = Orderbook::new();
-        let rest = vec![
-            make_update("BTC", dec!(101), dec!(5), Side::Ask),
-            make_update("BTC", dec!(100), dec!(10), Side::Bid),
-        ];
+        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(10))], vec![(dec!(101), dec!(5))]);
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 2);
@@ -673,7 +707,7 @@ mod tests {
     #[test]
     fn test_compare_books_both_empty() {
         let book = Orderbook::new();
-        let rest: Vec<guilder_abstraction::L2Update> = vec![];
+        let rest = make_snapshot("BTC", vec![], vec![]);
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 0);

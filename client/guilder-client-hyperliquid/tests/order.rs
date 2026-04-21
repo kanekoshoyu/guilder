@@ -65,20 +65,16 @@ async fn test_place_and_cancel_limit_order() {
             volume,
             OrderType::Limit,
             TimeInForce::Gtc,
+            None,
+            false,
             Some(cloid.clone()),
         )
         .await
         .expect("place_order failed");
 
-    // Cloid is converted to a 16-byte hex string (0x + 32 hex chars) via keccak256
-    // to meet Hyperliquid's Cloid format requirement.
-    use sha3::{Digest, Keccak256};
-    let hash = Keccak256::new_with_prefix(cloid.as_bytes());
-    let expected_cloid = format!("0x{}", hex::encode(&hash.finalize()[..16]));
-
     assert_eq!(order.symbol, "BTC");
     assert_eq!(order.side, OrderSide::Buy);
-    assert_eq!(order.cloid.as_deref(), Some(expected_cloid.as_str()));
+    assert_eq!(order.cloid.as_deref(), Some(cloid.as_str()));
     println!(
         "order placed: oid={} cloid={} price={} qty={}",
         order.order_id, order.cloid.as_deref().unwrap_or("none"), order.price, order.quantity
@@ -98,7 +94,7 @@ async fn test_place_and_cancel_limit_order() {
     println!("order confirmed in open orders");
 
     // 5. Cancel the order
-    let cancelled = client.cancel_order(order.order_id).await;
+    let cancelled = client.cancel_order_by_cloid(cloid.clone()).await;
     assert!(
         cancelled.is_ok(),
         "cancel_order failed: {:?}",

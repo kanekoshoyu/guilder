@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
 use guilder_abstraction::{GetMarketData, SubscribeMarketData};
+use std::collections::HashMap;
+use std::sync::RwLock;
 use tokio::sync::{broadcast, Semaphore};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
-use super::convert::apply_update;
+use super::convert::{apply_snapshot, apply_update, snapshot_to_book_updates};
 use super::storage::PriceLevelStorage;
 use super::types::{BookUpdate, Orderbook};
 
@@ -15,8 +16,8 @@ use super::types::{BookUpdate, Orderbook};
 /// prevent a thundering herd of REST calls when many streams gap at once.
 async fn resnapshot<S, C>(
     client: &C,
-    books: &DashMap<String, Orderbook<S>>,
-    last_updated: &DashMap<String, DateTime<Utc>>,
+    books: &RwLock<HashMap<String, Orderbook<S>>>,
+    last_updated: &RwLock<HashMap<String, DateTime<Utc>>>,
     rest_semaphore: &Semaphore,
     symbol: &str,
 ) -> Option<i64>
@@ -28,14 +29,18 @@ where
     let start = std::time::Instant::now();
     let _permit = rest_semaphore.acquire().await.ok()?;
     let snapshot = client.get_l2_orderbook(symbol.to_owned()).await.ok()?;
-    let seq = snapshot.last().map(|u| u.sequence);
-    let n_levels = snapshot.len();
+    let seq = snapshot.sequence;
+    let n_levels = snapshot.asks.len() + snapshot.bids.len();
     let mut book: Orderbook<S> = Orderbook::default();
-    for u in &snapshot {
-        apply_update(&mut book, u);
-    }
-    books.insert(symbol.to_owned(), book);
-    last_updated.insert(symbol.to_owned(), Utc::now());
+    apply_snapshot(&mut book, &snapshot);
+    books
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(symbol.to_owned(), book);
+    last_updated
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(symbol.to_owned(), Utc::now());
     let elapsed = start.elapsed();
     info!(
         symbol = symbol,
@@ -44,14 +49,14 @@ where
         elapsed_ms = elapsed.as_millis(),
         "orderbook REST snapshot complete"
     );
-    seq
+    Some(seq)
 }
 
 /// main function where the websocket messages are turned into storage
 pub(crate) async fn sync_loop<S, C>(
     client: Arc<C>,
-    books: Arc<DashMap<String, Orderbook<S>>>,
-    last_updated: Arc<DashMap<String, DateTime<Utc>>>,
+    books: Arc<RwLock<HashMap<String, Orderbook<S>>>>,
+    last_updated: Arc<RwLock<HashMap<String, DateTime<Utc>>>>,
     update_tx: broadcast::Sender<BookUpdate>,
     rest_semaphore: Arc<Semaphore>,
     symbol: String,
@@ -74,12 +79,21 @@ pub(crate) async fn sync_loop<S, C>(
     let mut msg_count: u64 = 0;
 
     loop {
-        let mut stream = client.subscribe_l2_update(symbol.clone());
+        let mut update_stream = (!ws_is_source_of_truth).then(|| client.subscribe_l2_update(symbol.clone()));
+        let mut snapshot_stream = ws_is_source_of_truth.then(|| client.subscribe_l2_snapshot(symbol.clone()));
         let mut last_seq: Option<i64> = None;
         loop {
             let timeout = tokio::time::sleep(std::time::Duration::from_secs(2));
             tokio::select! {
-                result = stream.next() => {
+                result = async {
+                    if let Some(stream) = snapshot_stream.as_mut() {
+                        stream.next().await.map(StreamEvent::Snapshot)
+                    } else if let Some(stream) = update_stream.as_mut() {
+                        stream.next().await.map(StreamEvent::Update)
+                    } else {
+                        None
+                    }
+                } => {
 
                     let Some(result) = result else {
                         // Stream closed — break to outer reconnect.
@@ -90,7 +104,56 @@ pub(crate) async fn sync_loop<S, C>(
                         info!("[OB sync_loop] new MEW message received!");
                     }
                     match result {
-                        Ok(update) => {
+                        StreamEvent::Snapshot(Ok(snapshot)) => {
+                            let started = std::time::Instant::now();
+                            if symbol == "MEW" {
+                                warn!(
+                                    symbol = symbol,
+                                    sequence = snapshot.sequence,
+                                    bid_levels = snapshot.bids.len(),
+                                    ask_levels = snapshot.asks.len(),
+                                    "orderbook snapshot received by sync_loop"
+                                );
+                            }
+                            last_seq = Some(snapshot.sequence);
+                            msg_count += 1;
+
+                            let local_ts_ms = chrono::Utc::now().timestamp_millis() as u64;
+                            let lag_ms = local_ts_ms.saturating_sub(snapshot.sequence as u64);
+                            if symbol == "MEW" {
+                                info!(
+                                    exchange_ts = snapshot.sequence,
+                                    local_ts = local_ts_ms,
+                                    lag_ms = lag_ms,
+                                    channel_len = update_tx.len(),
+                                    "orderbook WS lag (MEW)"
+                                );
+                            }
+
+                            let mut book: Orderbook<S> = Orderbook::default();
+                            apply_snapshot(&mut book, &snapshot);
+                            books
+                                .write()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(symbol.clone(), book);
+                            last_updated
+                                .write()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(symbol.clone(), Utc::now());
+                            for book_update in snapshot_to_book_updates(&snapshot) {
+                                let _ = update_tx.send(book_update);
+                            }
+                            if symbol == "MEW" {
+                                warn!(
+                                    symbol = symbol,
+                                    sequence = snapshot.sequence,
+                                    elapsed_ms = started.elapsed().as_millis(),
+                                    update_fanout = snapshot.bids.len() + snapshot.asks.len(),
+                                    "orderbook snapshot processed by sync_loop"
+                                );
+                            }
+                        }
+                        StreamEvent::Update(Ok(update)) => {
                             let new_message = last_seq.is_none_or(|prev| update.sequence != prev);
 
                             // hasnt recied any message ofter a while
@@ -131,22 +194,31 @@ pub(crate) async fn sync_loop<S, C>(
                                     if symbol.eq("MEW") {
                                         info!("mew inserting");
                                     }
-                                    books.insert(symbol.clone(), book);
+                                    books
+                                        .write()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .insert(symbol.clone(), book);
                                 } else {
-                                    let mut book = books.entry(symbol.clone()).or_default();
-                                    apply_update(book.value_mut(), &update);
+                                    let mut books = books.write().unwrap_or_else(|e| e.into_inner());
+                                    let book = books.entry(symbol.clone()).or_default();
+                                    apply_update(book, &update);
                                 }
 
-                                last_updated.insert(symbol.clone(), Utc::now());
+                                last_updated
+                                    .write()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(symbol.clone(), Utc::now());
                                 let _ = update_tx.send(super::convert::to_book_update(&update));
                             } else {
                                 // Additional level within the same WS message.
-                                let mut book = books.entry(symbol.clone()).or_default();
-                                apply_update(book.value_mut(), &update);
+                                let mut books = books.write().unwrap_or_else(|e| e.into_inner());
+                                let book = books.entry(symbol.clone()).or_default();
+                                apply_update(book, &update);
                                 let _ = update_tx.send(super::convert::to_book_update(&update));
                             }
                         }
-                        Err(e) => {
+                        StreamEvent::Snapshot(Err(e)) | StreamEvent::Update(Err(e)) => {
+                            warn!(symbol = symbol, error = %e, "orderbook stream yielded error");
                             error!(symbol = symbol, error = %e, "orderbook WS stream error, reconnecting");
                             if !ws_is_source_of_truth {
                                 // REST re-snapshot before resubscribing.
@@ -184,4 +256,9 @@ pub(crate) async fn sync_loop<S, C>(
         );
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
+}
+
+enum StreamEvent {
+    Snapshot(Result<guilder_abstraction::L2Snapshot, String>),
+    Update(Result<guilder_abstraction::L2Update, String>),
 }

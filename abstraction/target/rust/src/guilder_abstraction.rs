@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use futures_core::Stream;
-use serde::{Serialize, Deserialize};
 
 pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;
 
@@ -113,6 +113,22 @@ pub struct L2Update {
 	pub price: Decimal,
 	pub volume: Decimal,
 	pub side: Side,
+	pub sequence: i64,
+}
+
+/// single price level within an L2 snapshot
+#[derive(Debug, Clone)]
+pub struct L2Level {
+	pub price: Decimal,
+	pub volume: Decimal,
+}
+
+/// full L2 orderbook snapshot
+#[derive(Debug, Clone)]
+pub struct L2Snapshot {
+	pub symbol: String,
+	pub bids: Vec<L2Level>,
+	pub asks: Vec<L2Level>,
 	pub sequence: i64,
 }
 
@@ -299,7 +315,7 @@ pub trait GetMarketData {
 	/// get predicted funding rates for all symbols across all venues
 	async fn get_predicted_fundings(&self) -> Result<Vec<PredictedFunding>, String>;
 	/// get full L2 orderbook snapshot for a symbol (for initialization)
-	async fn get_l2_orderbook(&self, symbol: String) -> Result<Vec<L2Update>, String>;
+	async fn get_l2_orderbook(&self, symbol: String) -> Result<L2Snapshot, String>;
 }
 
 /// place, change, cancel order
@@ -322,6 +338,8 @@ pub trait ManageOrder {
 pub trait SubscribeMarketData {
 	/// subscribe to L2 orderbook updates for a symbol
 	fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>>;
+	/// subscribe to full L2 orderbook snapshots for a symbol
+	fn subscribe_l2_snapshot(&self, symbol: String) -> BoxStream<Result<L2Snapshot, String>>;
 	/// subscribe to market fill events for a symbol
 	fn subscribe_fill(&self, symbol: String) -> BoxStream<Result<Fill, String>>;
 	/// subscribe to asset context updates (OI, funding rate, mark price, 24h volume)
