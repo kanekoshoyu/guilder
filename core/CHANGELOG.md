@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 — 2026-04-21
+
+- **Breaking**: replace `DashMap` with `RwLock<HashMap>` in `OrderbookEngine` — fewer dependencies, simpler locking
+- **Breaking**: adapt to `L2Snapshot` return type from `get_l2_orderbook` (was `Vec<L2Update>`)
+- Remove verbose `info!`/`debug!` logging and heartbeat ticker from `track()` and `spawn_staleness_monitor()`
+- Remove `TRACK_HEARTBEAT_INTERVAL` constant
+
 ## 0.6.1 — 2026-04-17
 
 - Fix: refresh `last_updated` on every successful REST validation (not just on correction), so the staleness gate doesn't reject low-activity coins that are reconciling cleanly

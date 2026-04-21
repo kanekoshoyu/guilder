@@ -1,6 +1,6 @@
 [package]
 name = "guilder-client-hyperliquid"
-version = "0.4.20"
+version = "0.5.0"
 edition = "2021"
 description = "Hyperliquid client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -13,7 +13,7 @@ path = "src/bin/guilder_stress_test.rs"
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = "0.1.21"
+guilder-abstraction = "0.1.22"
 reqwest = { workspace = true, features = ["json"] }
 futures-core.workspace = true
 futures-util = "0.3"

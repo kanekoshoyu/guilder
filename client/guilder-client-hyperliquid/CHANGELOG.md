@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — 2026-04-21
+
+- **Breaking**: adapt to `L2Snapshot` return type from `get_l2_orderbook` (was `Vec<L2Update>`)
+- **Breaking**: update `SubscribeMarketData` impl for new `subscribe_l2_snapshot` method
+- Remove `dashmap` dependency
+- Remove verbose `info!` logging and rate-reporting interval from WS manager
+- Remove commented-out debug logging from transport
+
 ## 0.4.20 — 2026-04-17
 
 - Fix: swap bid/ask side mapping in `get_l2_orderbook` and `subscribe_l2_update`

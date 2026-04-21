@@ -1,6 +1,14 @@
 # Changelog
 All notable changes to both codegen and trading.yaml will be documented in this file.
 
+## [0.1.22] - 2026-04-21
+### Added
+- `L2Level` struct (`price: Decimal`, `volume: Decimal`)
+- `L2Snapshot` struct (`symbol`, `bids: Vec<L2Level>`, `asks: Vec<L2Level>`, `sequence`)
+- `subscribe_l2_snapshot` to `SubscribeMarketData` trait — returns `Stream<Result<L2Snapshot, String>>`
+### Changed
+- `GetMarketData::get_l2_orderbook` return type: `Result<Vec<L2Update>, String>` → `Result<L2Snapshot, String>`
+
 ## [0.1.4] - 2026-03-07
 ### Added
 - `SubscribeMarketData` trait with `subscribe_l2_update` and `subscribe_fill` (async, WebSocket)
