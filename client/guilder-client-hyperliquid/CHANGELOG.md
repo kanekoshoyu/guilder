@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 — 2026-04-22
+
+- Improve shared WebSocket connection recovery with a connection-level idle watchdog for half-open/silent sockets
+- Add throughput/reconnect diagnostics around the market WS manager to support orderbook freeze investigations
+- Remove `DashMap` from the remaining client-side manager cache in favor of explicit `RwLock<HashMap<...>>`
+
 ## 0.5.0 — 2026-04-21
 
 - **Breaking**: adapt to `L2Snapshot` return type from `get_l2_orderbook` (was `Vec<L2Update>`)

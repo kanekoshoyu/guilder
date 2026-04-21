@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-client-hyperliquid"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-stream",
  "chrono",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arc-swap",
  "chrono",

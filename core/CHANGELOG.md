@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 — 2026-04-22
+
+- Fix orderbook reconciliation self-deadlock by removing the read-then-write `DashMap` pattern and moving shared orderbook state to `RwLock<HashMap<...>>`
+- Add startup/status gating so symbols stay `Initializing` until the first real item arrives, suppressing misleading timeout warnings during warmup
+- Add orderbook stream timing and reconnect improvements, including fast reconnect on transport reset
+- Add shared `EngineStatus` / `StatusHandle` transition tracing support for top-level engines
+
 ## 0.7.0 — 2026-04-21
 
 - **Breaking**: replace `DashMap` with `RwLock<HashMap>` in `OrderbookEngine` — fewer dependencies, simpler locking

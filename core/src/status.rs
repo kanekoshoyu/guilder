@@ -44,6 +44,7 @@ impl EngineStatus {
 ///
 /// Writers call [`StatusHandle::set`]; readers call [`StatusHandle::get`].
 /// Uses an `AtomicU8` so reads never block.
+#[cfg_attr(not(feature = "tracing"), allow(dead_code))]
 #[derive(Debug)]
 struct StatusInner {
     state: AtomicU8,
