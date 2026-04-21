@@ -113,7 +113,6 @@ impl WsTransport for HyperliquidWs {
             .map_err(|e| WsError::Io(e.to_string()))
     }
 
-    // somewhat stalled, find cause
     async fn recv(&mut self) -> Option<Result<Self::Inbound, Self::Error>> {
         let stream = self.stream.as_mut()?;
         loop {

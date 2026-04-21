@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-abstraction"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "futures-core",
  "rust_decimal",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-client-hyperliquid"
-version = "0.4.20"
+version = "0.5.0"
 dependencies = [
  "async-stream",
  "chrono",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "guilder-core"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "arc-swap",
  "chrono",

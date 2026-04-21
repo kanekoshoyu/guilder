@@ -1,6 +1,7 @@
 use super::inbound::HyperliquidWsSubscriptionResponse;
 use super::transport::{HyperliquidWs, WsTransport};
 use super::{HyperliquidWsInboundMessage, HyperliquidWsOutboundMessage};
+use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{self, Duration};
 use tracing::warn;
@@ -8,6 +9,8 @@ use tracing::warn;
 use std::collections::HashMap;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
+const IDLE_WATCHDOG_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_IDLE_BEFORE_RECONNECT: Duration = Duration::from_secs(40);
 const BACKOFF_MAX_SECS: u64 = 30;
 const SEND_SPACING: Duration = Duration::from_millis(40);
 const FANOUT_CAPACITY: usize = 1024;
@@ -259,6 +262,9 @@ async fn run_manager(
         backoff_secs = 1;
         let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
         heartbeat.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        let mut idle_watchdog = time::interval(IDLE_WATCHDOG_INTERVAL);
+        idle_watchdog.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        let mut last_inbound_activity = Instant::now();
 
         loop {
             tokio::select! {
@@ -281,10 +287,27 @@ async fn run_manager(
                         break;
                     }
                 }
+                _ = idle_watchdog.tick() => {
+                    let idle_for = last_inbound_activity.elapsed();
+                    if idle_for >= MAX_IDLE_BEFORE_RECONNECT {
+                        warn!(
+                            idle_for_ms = idle_for.as_millis(),
+                            "WS idle watchdog triggered, reconnecting"
+                        );
+                        fanout_error(&subscriptions, "websocket idle watchdog triggered reconnect".to_string());
+                        let _ = ws.close().await;
+                        break;
+                    }
+                }
                 inbound = ws.recv() => {
                     match inbound {
-                        Some(Ok(HyperliquidWsInboundMessage::Pong)) => {}
-                        Some(Ok(msg)) => dispatch_message(&mut subscriptions, &msg, user_addr.as_deref()),
+                        Some(Ok(HyperliquidWsInboundMessage::Pong)) => {
+                            last_inbound_activity = Instant::now();
+                        }
+                        Some(Ok(msg)) => {
+                            last_inbound_activity = Instant::now();
+                            dispatch_message(&mut subscriptions, &msg, user_addr.as_deref())
+                        }
                         Some(Err(err)) => {
                             warn!(error = %err, "WS recv error, reconnecting");
                             fanout_error(&subscriptions, err.to_string());

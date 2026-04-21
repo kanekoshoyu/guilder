@@ -128,6 +128,7 @@ pub(crate) struct HyperliquidWsOrderInfo {
 
 #[derive(Deserialize, Clone, Debug)]
 pub(crate) struct HyperliquidWsLedgerUpdates {
+    #[serde(default)]
     pub(crate) updates: Vec<HyperliquidWsLedgerEntry>,
 }
 

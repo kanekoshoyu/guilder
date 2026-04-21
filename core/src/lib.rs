@@ -1,3 +1,6 @@
+/// Lifecycle status enum and atomic handle
+pub mod status;
+
 /// orderbook data structures and live sync engine
 #[cfg(feature = "engine")]
 pub mod orderbook;
@@ -11,6 +14,8 @@ pub use orderbook::{
     BookUpdate, BoundedVec, CurrencyPair, EngineError, Orderbook, OrderbookEngine,
     ReconciliationHealthView, SortedVec,
 };
+
+pub use status::{EngineStatus, StatusHandle};
 
 #[cfg(feature = "account")]
 pub use account::{

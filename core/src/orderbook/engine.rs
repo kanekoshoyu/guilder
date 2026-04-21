@@ -1,3 +1,4 @@
+use crate::status::{EngineStatus, StatusHandle};
 use chrono::{DateTime, Utc};
 use guilder_abstraction::{GetMarketData, Side, SubscribeMarketData};
 use rust_decimal::Decimal;
@@ -82,6 +83,9 @@ where
     pub total_corrections: Arc<AtomicU64>,
     /// Per-symbol reconciliation health — written by reconcile loop, read by handle.
     reconciliation_health: Arc<RwLock<HashMap<String, ReconciliationHealth>>>,
+    /// Per-symbol lifecycle status — readers use this to distinguish warming-up
+    /// symbols from active ones that should be emitting data.
+    symbol_status: Arc<RwLock<HashMap<String, StatusHandle>>>,
 }
 
 /// Maximum number of concurrent REST snapshot requests to avoid rate-limiting.
@@ -108,6 +112,7 @@ where
             total_drifts: Arc::new(AtomicU64::new(0)),
             total_corrections: Arc::new(AtomicU64::new(0)),
             reconciliation_health: Arc::new(RwLock::new(HashMap::new())),
+            symbol_status: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -325,6 +330,39 @@ where
 
     }
 
+    /// Mark the provided engine status as `Active` once every tracked symbol
+    /// has seen its first item. Until then, the engine is still warming up and
+    /// per-symbol sync loops may legitimately time out while subscriptions
+    /// settle.
+    pub fn spawn_activation_monitor<F>(self: &Arc<Self>, on_active: F)
+    where
+        F: Fn() + 'static,
+    {
+        let symbol_status = Arc::clone(&self.symbol_status);
+
+        tokio::task::spawn_local(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(250));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                ticker.tick().await;
+
+                let statuses = symbol_status.read().unwrap_or_else(|e| e.into_inner());
+                if statuses.is_empty() {
+                    continue;
+                }
+
+                if statuses
+                    .values()
+                    .all(|symbol_status| symbol_status.get() == EngineStatus::Active)
+                {
+                    on_active();
+                    return;
+                }
+            }
+        });
+    }
+
     /// Subscribe to a specific set of symbols and block, syncing orderbooks.
     pub async fn track(&self, symbols: Vec<String>) -> Result<(), EngineError> {
         if !self.skip_initial_snapshot {
@@ -335,6 +373,11 @@ where
         let mut futures: Vec<_> = symbols
             .into_iter()
             .map(|symbol| {
+                let status = StatusHandle::new(EngineStatus::Initializing);
+                self.symbol_status
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(symbol.clone(), status.clone());
                 Box::pin(sync_loop(
                     Arc::clone(&self.client),
                     Arc::clone(&self.books),
@@ -343,6 +386,7 @@ where
                     Arc::clone(&self.rest_semaphore),
                     symbol,
                     self.skip_initial_snapshot,
+                    status,
                 ))
             })
             .collect();
@@ -367,6 +411,11 @@ where
                                 }
                             }
                             for symbol in new_symbols {
+                                let status = StatusHandle::new(EngineStatus::Initializing);
+                                self.symbol_status
+                                    .write()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(symbol.clone(), status.clone());
                                 futures.push(Box::pin(sync_loop(
                                     Arc::clone(&self.client),
                                     Arc::clone(&self.books),
@@ -375,6 +424,7 @@ where
                                     Arc::clone(&self.rest_semaphore),
                                     symbol,
                                     self.skip_initial_snapshot,
+                                    status,
                                 )));
                             }
                         }
@@ -407,6 +457,11 @@ where
                                     }
                                 }
                                 for symbol in new_symbols {
+                                    let status = StatusHandle::new(EngineStatus::Initializing);
+                                    self.symbol_status
+                                        .write()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .insert(symbol.clone(), status.clone());
                                     futures.push(Box::pin(sync_loop(
                                         Arc::clone(&self.client),
                                         Arc::clone(&self.books),
@@ -415,6 +470,7 @@ where
                                         Arc::clone(&self.rest_semaphore),
                                         symbol,
                                         self.skip_initial_snapshot,
+                                        status,
                                     )));
                                 }
                             }
@@ -504,6 +560,15 @@ where
             .iter()
             .map(|(symbol, ts)| (symbol.clone(), *ts))
             .collect()
+    }
+
+    /// Lifecycle status handle for a symbol, if tracked.
+    pub fn symbol_status(&self, symbol: &str) -> Option<StatusHandle> {
+        self.symbol_status
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(symbol)
+            .cloned()
     }
 
     /// Quote-currency liquidity within a slippage boundary on one side.
