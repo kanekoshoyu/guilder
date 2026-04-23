@@ -191,12 +191,16 @@ pub(crate) async fn sync_loop<S, C>(
                                 reconnect_delay = std::time::Duration::from_millis(50);
                             } else {
                                 reconnect_delay = std::time::Duration::from_secs(1);
-                                warn!(symbol = symbol, error = %e, "orderbook stream yielded error");
-                                error!(symbol = symbol, error = %e, "orderbook WS stream error, reconnecting");
+                                if status.get() == EngineStatus::Active {
+                                    warn!(symbol = symbol, error = %e, "orderbook stream yielded error");
+                                    error!(symbol = symbol, error = %e, "orderbook WS stream error, reconnecting");
+                                }
                             }
                             if !ws_is_source_of_truth {
                                 // REST re-snapshot before resubscribing.
-                                warn!(symbol = symbol, "REST resnapshot + resubscribe");
+                                if status.get() == EngineStatus::Active {
+                                    warn!(symbol = symbol, "REST resnapshot + resubscribe");
+                                }
                                 let _ = resnapshot(
                                     client.as_ref(),
                                     &books,
@@ -228,11 +232,13 @@ pub(crate) async fn sync_loop<S, C>(
             }
         }
 
-        warn!(
-            symbol = symbol,
-            msg_count = msg_count,
-            "orderbook WS stream ended, reconnecting"
-        );
+        if status.get() == EngineStatus::Active {
+            warn!(
+                symbol = symbol,
+                msg_count = msg_count,
+                "orderbook WS stream ended, reconnecting"
+            );
+        }
         // Reset to Initializing so timeout stays suppressed during re-subscribe.
         status.set(EngineStatus::Initializing);
         msg_count = 0;

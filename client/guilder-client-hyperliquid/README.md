@@ -18,6 +18,16 @@ Implements all guilder abstraction traits against the Hyperliquid REST and WebSo
 | `SubscribeMarketData` | Complete |
 | `SubscribeUserEvents` | Complete |
 
+## Additional methods (beyond guilder traits)
+
+These inherent methods on `HyperliquidClient` are not part of the `guilder_abstraction` traits — they are Hyperliquid-specific lifecycle and diagnostic helpers.
+
+| Method | Signature | Purpose |
+|---|---|---|
+| `unsubscribe_user_events` | `fn unsubscribe_user_events(&self)` | Unsubscribe from all user event WebSocket streams (fills, orders, funding, spot balance) for graceful shutdown |
+| `unsubscribe_market_data` | `fn unsubscribe_market_data(&self, symbol: &str)` | Unsubscribe from market data WebSocket streams (l2Book, trades, asset context) for a single coin |
+| `get_user_rate_limit` | `async fn get_user_rate_limit(&self) -> Result<UserRateLimit, String>` | Query Hyperliquid's `userRateLimit` info endpoint for server-side request budget and cumulative volume |
+
 ## Usage
 
 ```toml

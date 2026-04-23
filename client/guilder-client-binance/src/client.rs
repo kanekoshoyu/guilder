@@ -1,7 +1,7 @@
 use futures_util::stream;
 use guilder_abstraction::{
-    self, AssetContext, Balance, BoxStream, Deposit, Fill, FundingPayment, L2Snapshot, L2Update,
-    Liquidation, OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position,
+    self, AccountBalance, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Snapshot,
+    L2Update, Liquidation, OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position,
     PredictedFunding, TimeInForce, UserFill, UserRateLimit, Withdrawal,
 };
 use reqwest::Client;
@@ -150,15 +150,7 @@ impl guilder_abstraction::GetAccountSnapshot for BinanceClient {
         unimplemented!()
     }
 
-    async fn get_collateral(&self) -> Result<Decimal, String> {
-        unimplemented!()
-    }
-
-    async fn get_spot_balance(&self) -> Result<Vec<Balance>, String> {
-        unimplemented!()
-    }
-
-    async fn get_collateral_balance(&self, symbol: String) -> Result<Balance, String> {
+    async fn get_balance(&self) -> Result<Vec<AccountBalance>, String> {
         unimplemented!()
     }
 
@@ -190,14 +182,22 @@ impl guilder_abstraction::SubscribeUserEvents for BinanceClient {
         Box::pin(stream::pending())
     }
 
-    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<Balance>, String>> {
+    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<AccountBalance>, String>> {
         Box::pin(stream::pending())
     }
 
     fn subscribe_spot_balance_with_address(
         &self,
         address: String,
-    ) -> BoxStream<Result<Vec<Balance>, String>> {
+    ) -> BoxStream<Result<Vec<AccountBalance>, String>> {
         Box::pin(stream::pending())
+    }
+
+    async fn unsubscribe_user_events(&self) {
+    }
+}
+
+impl guilder_abstraction::SubscribeMarketDataOps for BinanceClient {
+    async fn unsubscribe_market_data(&self, _symbol: String) {
     }
 }

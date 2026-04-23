@@ -236,13 +236,16 @@ struct RestAssetCtx {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct ClearinghouseStateResponse {
     margin_summary: MarginSummary,
     asset_positions: Vec<AssetPosition>,
 }
 
+/// Kept for get_positions compatibility; margin_summary fields are unused since get_collateral was removed.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct MarginSummary {
     account_value: String,
 }
@@ -1520,37 +1523,24 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             .collect())
     }
 
-    /// Returns total account value (collateral) from `clearinghouseState`. Requires `with_auth`.
-    async fn get_collateral(&self) -> Result<Decimal, String> {
-        let user = self.require_user_address()?;
-        // clearinghouseState → weight 2
-        let resp = self
-            .info_post(
-                serde_json::json!({"type": "clearinghouseState", "user": user}),
-                2,
-                "get_collateral",
-            )
-            .await?;
-        let state: ClearinghouseStateResponse = parse_response(resp).await?;
-        parse_decimal(&state.margin_summary.account_value)
-            .ok_or_else(|| "invalid account value".to_string())
-    }
-
-    /// Returns all spot wallet balances from `spotState`. Requires `with_auth`.
-    async fn get_spot_balance(&self) -> Result<Vec<guilder_abstraction::Balance>, String> {
+    /// Returns all per-asset balances from `spotClearinghouseState` with margin health.
+    /// Requires `with_auth`.
+    async fn get_balance(&self) -> Result<Vec<guilder_abstraction::AccountBalance>, String> {
         let user = self.require_user_address()?;
         // spotClearinghouseState → weight 15
         let resp = self
             .info_post(
                 serde_json::json!({"type": "spotClearinghouseState", "user": user}),
                 15,
-                "get_spot_balance",
+                "get_balance",
             )
             .await?;
 
         #[derive(Deserialize)]
         struct SpotStateResponse {
             balances: Vec<SpotBalance>,
+            #[serde(rename = "tokenToAvailableAfterMaintenance")]
+            token_to_available_after_maintenance: Vec<(i32, String)>,
         }
 
         #[allow(dead_code)]
@@ -1568,43 +1558,45 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
         let state: SpotStateResponse = parse_response(resp).await?;
 
+        // Build a safe lookup map from token ID → available after maintenance.
+        // Not every token appears in the map — absence means zero maintenance impact.
+        let safe_map: HashMap<i32, Decimal> = state
+            .token_to_available_after_maintenance
+            .into_iter()
+            .filter_map(|(token_id, value)| {
+                parse_decimal(&value).map(|v| (token_id, v))
+            })
+            .collect();
+
         state
             .balances
             .into_iter()
             .map(|balance| {
-                let total = parse_decimal(&balance.total)
+                let equity = parse_decimal(&balance.total)
                     .ok_or_else(|| "invalid total balance".to_string())?;
-                let locked = parse_decimal(&balance.hold)
+                let hold = parse_decimal(&balance.hold)
                     .ok_or_else(|| "invalid hold balance".to_string())?;
-                let available = total - locked;
+                let free = equity - hold;
 
-                Ok(guilder_abstraction::Balance {
-                    coin: balance.coin,
-                    total,
-                    available,
-                    locked,
+                let safe = balance.token.and_then(|token_id| safe_map.get(&token_id).copied());
+                let usable = match safe {
+                    Some(s) => std::cmp::min(free, s),
+                    None => free,
+                };
+                let maintenance = safe.map(|s| equity - s);
+
+                Ok(guilder_abstraction::AccountBalance {
+                    token: balance.coin,
+                    balance: equity,
+                    free,
+                    safe,
+                    usable,
+                    hold,
+                    margin_used: None,
+                    maintenance,
                 })
             })
             .collect()
-    }
-
-    /// Returns clearing house collateral balance for an asset. Currently returns the total collateral.
-    /// Requires `with_auth`.
-    async fn get_collateral_balance(
-        &self,
-        asset: String,
-    ) -> Result<guilder_abstraction::Balance, String> {
-        if asset.to_uppercase() != "USDC" {
-            return Err(format!("only USDC collateral is supported, got {}", asset));
-        }
-
-        let total = self.get_collateral().await?;
-        Ok(guilder_abstraction::Balance {
-            coin: "USDC".to_string(),
-            total,
-            available: total,
-            locked: Decimal::ZERO,
-        })
     }
 
     /// Returns the user's address-level API rate limit budget.
@@ -1758,7 +1750,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     /// Subscribe to spot wallet balance updates for the registered user address.
     fn subscribe_spot_balance(
         &self,
-    ) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
+    ) -> BoxStream<Result<Vec<guilder_abstraction::AccountBalance>, String>> {
         let Some(addr) = self.user_address.as_ref() else {
             return Box::pin(stream::iter(vec![Err(
                 "user address not registered".to_string()
@@ -1771,7 +1763,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     fn subscribe_spot_balance_with_address(
         &self,
         address: String,
-    ) -> BoxStream<Result<Vec<guilder_abstraction::Balance>, String>> {
+    ) -> BoxStream<Result<Vec<guilder_abstraction::AccountBalance>, String>> {
         subscribe_user_stream(
             self,
             address.clone(),
@@ -1784,6 +1776,24 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
                 }
             },
         )
+    }
+
+    async fn unsubscribe_user_events(&self) {
+        // Unsubscribe from the market-level user manager if we have a user address.
+        if let Some(addr) = &self.user_address {
+            self.market_ws_manager.unsubscribe_user(addr);
+        }
+        // Also unsubscribe from all per-user managers.
+        let managers = self.user_ws_managers.read().unwrap_or_else(|e| e.into_inner());
+        for (addr, manager) in managers.iter() {
+            manager.unsubscribe_user(addr);
+        }
+    }
+}
+
+impl guilder_abstraction::SubscribeMarketDataOps for HyperliquidClient {
+    async fn unsubscribe_market_data(&self, symbol: String) {
+        self.market_ws_manager.unsubscribe_by_coin(&symbol);
     }
 }
 

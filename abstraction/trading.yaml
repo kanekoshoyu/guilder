@@ -166,20 +166,9 @@ traits:
         description: get currently resting orders
         return_type: Result<Vec<OpenOrder>, String>
 
-      - name: get_collateral
-        description: get available account collateral
-        return_type: Result<Decimal, String>
-
-      - name: get_spot_balance
-        description: get all spot wallet balances
-        return_type: Result<Vec<Balance>, String>
-
-      - name: get_collateral_balance
-        description: get clearing house collateral balance (typically USDC only)
-        return_type: Result<Balance, String>
-        args:
-          - name: asset
-            type: String
+      - name: get_balance
+        description: get all per-asset account balances with margin health
+        return_type: Result<Vec<AccountBalance>, String>
 
       - name: get_user_rate_limit
         description: get user's address-level API rate limit budget (remaining requests, cumulative volume, cap)
@@ -211,13 +200,28 @@ traits:
 
       - name: subscribe_spot_balance
         description: subscribe to spot wallet balance updates for the registered user address (requires authentication)
-        return_type: Stream<Result<Vec<Balance>, String>>
+        return_type: Stream<Result<Vec<AccountBalance>, String>>
 
       - name: subscribe_spot_balance_with_address
         description: subscribe to spot wallet balance updates for a specific address
-        return_type: Stream<Result<Vec<Balance>, String>>
+        return_type: Stream<Result<Vec<AccountBalance>, String>>
         args:
           - name: address
+            type: String
+
+      - name: unsubscribe_user_events
+        description: unsubscribe from all user event streams
+        return_type: "()"
+
+  - name: SubscribeMarketDataOps
+    description: operational helpers for market data subscriptions (unsubscribe)
+    async: true
+    methods:
+      - name: unsubscribe_market_data
+        description: unsubscribe from market data streams for a symbol
+        return_type: "()"
+        args:
+          - name: symbol
             type: String
 
 
@@ -546,17 +550,33 @@ structs:
       - name: timestamp_ms
         type: i64
 
-  - name: Balance
-    description: account balance for an asset
+  - name: AccountBalance
+    description: per-asset balance from spotClearinghouseState with margin health
     values:
-      - name: coin
+      - name: token
         type: String
-      - name: total
+        description: asset symbol (e.g. "USDC")
+      - name: equity
         type: Decimal
-      - name: available
+        description: total value (balances.total)
+      - name: free
         type: Decimal
-      - name: locked
+        description: equity minus holds (equity - hold)
+      - name: safe
+        type: Option<Decimal>
+        description: equity minus maintenance margin (tokenToAvailableAfterMaintenance[token])
+      - name: usable
         type: Decimal
+        description: min(free, safe.unwrap_or(free))
+      - name: hold
+        type: Decimal
+        description: locked in open orders (balances.hold)
+      - name: margin_used
+        type: Option<Decimal>
+        description: margin used for positions (None for spot-only assets)
+      - name: maintenance
+        type: Option<Decimal>
+        description: maintenance margin requirement (computed as equity - safe when safe exists)
 
   - name: UserRateLimit
     description: user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint

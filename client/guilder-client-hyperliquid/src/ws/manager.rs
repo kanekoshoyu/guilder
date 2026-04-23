@@ -1,19 +1,21 @@
 use super::inbound::HyperliquidWsSubscriptionResponse;
 use super::transport::{HyperliquidWs, WsTransport};
 use super::{HyperliquidWsInboundMessage, HyperliquidWsOutboundMessage};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::time::{self, Duration};
+use tokio::time::{self, Duration as TokioDuration};
 use tracing::warn;
 
 use std::collections::HashMap;
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
-const IDLE_WATCHDOG_INTERVAL: Duration = Duration::from_secs(5);
-const MAX_IDLE_BEFORE_RECONNECT: Duration = Duration::from_secs(40);
+const HEARTBEAT_INTERVAL: TokioDuration = TokioDuration::from_secs(25);
+const IDLE_WATCHDOG_INTERVAL: TokioDuration = TokioDuration::from_secs(5);
+const MAX_IDLE_BEFORE_RECONNECT: TokioDuration = TokioDuration::from_secs(40);
 const BACKOFF_MAX_SECS: u64 = 30;
-const SEND_SPACING: Duration = Duration::from_millis(40);
+const SEND_SPACING: TokioDuration = TokioDuration::from_millis(40);
 const FANOUT_CAPACITY: usize = 1024;
+/// Grace period after unsubscribe during which messages for that coin are silently dropped.
+const UNSUBSCRIBE_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) enum HyperliquidSubscription {
@@ -90,6 +92,19 @@ impl HyperliquidSubscription {
             Self::NonFundingLedger { user_addr } => {
                 serde_json::json!({"type": "userNonFundingLedgerUpdates", "user": user_addr})
             }
+        }
+    }
+
+    /// Returns the coin/user symbol for this subscription, used for tracking
+    /// recent unsubscriptions so in-flight messages are silently dropped.
+    fn unsubscribe_symbol(&self) -> Option<String> {
+        match self {
+            Self::L2Book { coin }
+            | Self::Trades { coin }
+            | Self::ActiveAssetCtx { coin } => Some(coin.clone()),
+            Self::UserEvents { user_addr }
+            | Self::OrderUpdates { user_addr }
+            | Self::NonFundingLedger { user_addr } => Some(user_addr.clone()),
         }
     }
 
@@ -224,6 +239,37 @@ impl HyperliquidWsManager {
     pub(crate) fn unsubscribe(&self, subscription: HyperliquidSubscription) {
         let _ = self.cmd_tx.send(ManagerCommand::Release { subscription });
     }
+
+    /// Unsubscribe all subscriptions that match the given coin/user symbol.
+    /// Used by bridges during shutdown to cleanly drain subscriptions before exiting.
+    pub(crate) fn unsubscribe_by_coin(&self, coin: &str) {
+        // We can't inspect the manager's subscription map from here, so we
+        // send a dedicated command. But for now, the bridge knows its own
+        // subscriptions and calls `unsubscribe` per-subscription. This method
+        // is a convenience for the case where we know the coin but not the
+        // exact subscription type (e.g. L2Book vs Trades vs ActiveAssetCtx).
+        // We send Release for all known subscription variants for this coin.
+        let variants = vec![
+            HyperliquidSubscription::L2Book { coin: coin.to_string() },
+            HyperliquidSubscription::Trades { coin: coin.to_string() },
+            HyperliquidSubscription::ActiveAssetCtx { coin: coin.to_string() },
+        ];
+        for sub in variants {
+            let _ = self.cmd_tx.send(ManagerCommand::Release { subscription: sub });
+        }
+    }
+
+    /// Unsubscribe all user-related subscriptions for a given user address.
+    pub(crate) fn unsubscribe_user(&self, user_addr: &str) {
+        let variants = vec![
+            HyperliquidSubscription::UserEvents { user_addr: user_addr.to_string() },
+            HyperliquidSubscription::OrderUpdates { user_addr: user_addr.to_string() },
+            HyperliquidSubscription::NonFundingLedger { user_addr: user_addr.to_string() },
+        ];
+        for sub in variants {
+            let _ = self.cmd_tx.send(ManagerCommand::Release { subscription: sub });
+        }
+    }
 }
 
 async fn run_manager(
@@ -233,14 +279,26 @@ async fn run_manager(
 ) {
     let mut ws = HyperliquidWs::new();
     let mut subscriptions: HashMap<HyperliquidSubscription, ManagedSubscription> = HashMap::new();
+    // Coins recently unsubscribed — messages for these during grace period are silently dropped.
+    let mut unsubscribed_coins: HashMap<String, Instant> = HashMap::new();
     let mut backoff_secs = 1_u64;
 
     loop {
+        // Clean up expired unsubscribe entries on each outer loop iteration.
+        unsubscribed_coins.retain(|_, since| since.elapsed() < UNSUBSCRIBE_GRACE_PERIOD);
+
         while subscriptions.is_empty() {
             let Some(cmd) = cmd_rx.recv().await else {
                 return;
             };
-            handle_command(cmd, &mut subscriptions, &mut ws, &send_limiter).await;
+            handle_command(
+                cmd,
+                &mut subscriptions,
+                &mut unsubscribed_coins,
+                &mut ws,
+                &send_limiter,
+            )
+            .await;
         }
 
         if let Err(err) = ws.connect().await {
@@ -273,7 +331,14 @@ async fn run_manager(
                         let _ = ws.close().await;
                         return;
                     };
-                    handle_command(cmd, &mut subscriptions, &mut ws, &send_limiter).await;
+                    handle_command(
+                        cmd,
+                        &mut subscriptions,
+                        &mut unsubscribed_coins,
+                        &mut ws,
+                        &send_limiter,
+                    )
+                    .await;
                     if subscriptions.is_empty() {
                         let _ = ws.close().await;
                         break;
@@ -306,7 +371,7 @@ async fn run_manager(
                         }
                         Some(Ok(msg)) => {
                             last_inbound_activity = Instant::now();
-                            dispatch_message(&mut subscriptions, &msg, user_addr.as_deref())
+                            dispatch_message(&mut subscriptions, &unsubscribed_coins, &msg, user_addr.as_deref())
                         }
                         Some(Err(err)) => {
                             warn!(error = %err, "WS recv error, reconnecting");
@@ -330,6 +395,7 @@ async fn run_manager(
 async fn handle_command(
     cmd: ManagerCommand,
     subscriptions: &mut HashMap<HyperliquidSubscription, ManagedSubscription>,
+    unsubscribed_coins: &mut HashMap<String, Instant>,
     ws: &mut HyperliquidWs,
     send_limiter: &WsSendRateLimiter,
 ) {
@@ -380,6 +446,12 @@ async fn handle_command(
             };
 
             if remove {
+                // Track the coin(s) this subscription was for so in-flight messages
+                // during shutdown don't trigger spurious warnings.
+                if let Some(coin) = subscription.unsubscribe_symbol() {
+                    unsubscribed_coins.insert(coin, Instant::now());
+                }
+
                 subscriptions.remove(&subscription);
                 if ws.is_connected() {
                     if let Err(err) =
@@ -415,6 +487,7 @@ async fn send_with_limit(
 
 fn dispatch_message(
     subscriptions: &mut HashMap<HyperliquidSubscription, ManagedSubscription>,
+    unsubscribed_coins: &HashMap<String, Instant>,
     msg: &HyperliquidWsInboundMessage,
     manager_user: Option<&str>,
 ) {
@@ -445,9 +518,51 @@ fn dispatch_message(
                 }
             }
             if matched == 0 {
-                warn!(message = %message_label(msg), "WS message did not match any active subscription");
+                // Check if this message belongs to a recently unsubscribed coin.
+                // In-flight messages during the grace period are silently dropped.
+                let sym = message_symbol(msg);
+                let recently_unsubscribed = sym
+                    .as_ref()
+                    .map(|s| {
+                        unsubscribed_coins
+                            .get(s)
+                            .is_some_and(|since| since.elapsed() < UNSUBSCRIBE_GRACE_PERIOD)
+                    })
+                    .unwrap_or(false);
+                if recently_unsubscribed {
+                    tracing::debug!(
+                        message = %message_label(msg),
+                        "WS message dropped for recently unsubscribed symbol"
+                    );
+                } else {
+                    let is_draining = subscriptions.is_empty();
+                    if is_draining {
+                        tracing::debug!(message = %message_label(msg), "WS message did not match any active subscription (draining)");
+                    } else {
+                        warn!(message = %message_label(msg), "WS message did not match any active subscription");
+                    }
+                }
             }
         }
+    }
+}
+
+/// Extract the coin/user symbol from a message, for unsubscribe-grace lookup.
+fn message_symbol(msg: &HyperliquidWsInboundMessage) -> Option<String> {
+    match msg {
+        HyperliquidWsInboundMessage::L2Book(book) => Some(book.coin.clone()),
+        HyperliquidWsInboundMessage::ActiveAssetCtx(ctx) => Some(ctx.coin.clone()),
+        HyperliquidWsInboundMessage::Trades(trades) => {
+            trades.first().map(|t| t.coin.clone())
+        }
+        HyperliquidWsInboundMessage::User(_)
+        | HyperliquidWsInboundMessage::OrderUpdates(_)
+        | HyperliquidWsInboundMessage::NonFundingLedger(_) => {
+            // User messages don't carry a coin — they're identified by user address.
+            // The unsubscribed_coins map stores user addresses too.
+            None
+        }
+        _ => None,
     }
 }
 

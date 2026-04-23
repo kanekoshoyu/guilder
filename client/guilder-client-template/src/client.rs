@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<L2Snapshot, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<Balance>, String>, Result<Balance, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<L2Snapshot, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<AccountBalance>, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -124,15 +124,7 @@ impl guilder_abstraction::GetAccountSnapshot for ExchangeClient {
         Err("not implemented".to_string())
     }
 
-    async fn get_collateral(&self) -> Result<Decimal, String> {
-        Err("not implemented".to_string())
-    }
-
-    async fn get_spot_balance(&self) -> Result<Vec<Balance>, String> {
-        Err("not implemented".to_string())
-    }
-
-    async fn get_collateral_balance(&self, asset: String) -> Result<Balance, String> {
+    async fn get_balance(&self) -> Result<Vec<AccountBalance>, String> {
         Err("not implemented".to_string())
     }
 
@@ -165,12 +157,25 @@ impl guilder_abstraction::SubscribeUserEvents for ExchangeClient {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<Balance>, String>> {
+    fn subscribe_spot_balance(&self) -> BoxStream<Result<Vec<AccountBalance>, String>> {
         Box::pin(stream::empty())
     }
 
-    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<Balance>, String>> {
+    fn subscribe_spot_balance_with_address(&self, address: String) -> BoxStream<Result<Vec<AccountBalance>, String>> {
         Box::pin(stream::empty())
+    }
+
+    async fn unsubscribe_user_events(&self) -> () {
+        Err("not implemented".to_string())
+    }
+
+}
+
+#[allow(unused_variables)]
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::SubscribeMarketDataOps for ExchangeClient {
+    async fn unsubscribe_market_data(&self, symbol: String) -> () {
+        Err("not implemented".to_string())
     }
 
 }

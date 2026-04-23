@@ -5,7 +5,7 @@
 /// happens via the `as_*` methods below.
 use crate::ws::parse_decimal;
 use guilder_abstraction::{
-    AssetContext, Balance, Deposit, Fill, FundingPayment, L2Level, L2Snapshot, Liquidation,
+    AccountBalance, AssetContext, Deposit, Fill, FundingPayment, L2Level, L2Snapshot, Liquidation,
     OrderSide, OrderStatus, OrderUpdate, UserFill, Withdrawal,
 };
 use serde::Deserialize;
@@ -373,7 +373,7 @@ impl HyperliquidWsInboundMessage {
     }
 
     /// Extract spot balances from a `User` event's spot state.
-    pub fn as_spot_balance(&self) -> Option<Vec<Balance>> {
+    pub fn as_spot_balance(&self) -> Option<Vec<AccountBalance>> {
         let HyperliquidWsInboundMessage::User(event) = self else {
             return None;
         };
@@ -382,14 +382,18 @@ impl HyperliquidWsInboundMessage {
         let result: Vec<_> = balances
             .iter()
             .filter_map(|b| {
-                let total = parse_decimal(&b.total)?;
-                let locked = parse_decimal(&b.hold)?;
-                let available = total - locked;
-                Some(Balance {
-                    coin: b.coin.clone(),
-                    total,
-                    available,
-                    locked,
+                let equity = parse_decimal(&b.total)?;
+                let hold = parse_decimal(&b.hold)?;
+                let free = equity - hold;
+                Some(AccountBalance {
+                    token: b.coin.clone(),
+                    balance: equity,
+                    free,
+                    safe: None,
+                    usable: free,
+                    hold,
+                    margin_used: None,
+                    maintenance: None,
                 })
             })
             .collect();

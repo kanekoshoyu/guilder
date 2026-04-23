@@ -24,19 +24,19 @@ async fn test_place_and_cancel_limit_order() {
     // 0. Cancel all existing orders to free up margin
     let _ = client.cancel_all_order().await;
 
-    // 1. Check spot balance for USDC
+    // 1. Check balance for USDC
     let balances = client
-        .get_spot_balance()
+        .get_balance()
         .await
-        .expect("get_spot_balance failed");
-    let usdc = balances.iter().find(|b| b.coin == "USDC");
-    let usdc = usdc.expect("no USDC spot balance found in test wallet");
+        .expect("get_balance failed");
+    let usdc = balances.iter().find(|b| b.token == "USDC");
+    let usdc = usdc.expect("no USDC balance found in test wallet");
     assert!(
-        usdc.available > Decimal::ZERO,
-        "no available USDC in test wallet (total={}, available={}, locked={})",
-        usdc.total, usdc.available, usdc.locked
+        usdc.free > Decimal::ZERO,
+        "no free USDC in test wallet (equity={}, free={}, hold={})",
+        usdc.equity, usdc.free, usdc.hold
     );
-    println!("USDC spot balance: total={} available={} locked={}", usdc.total, usdc.available, usdc.locked);
+    println!("USDC balance: equity={} free={} hold={}", usdc.equity, usdc.free, usdc.hold);
 
     // 2. Check current BTC price
     let price = client

@@ -201,13 +201,17 @@ class Withdrawal:
 		self.amount_usd = amount_usd
 		self.timestamp_ms = timestamp_ms
 
-class Balance:
-	"""account balance for an asset"""
-	def __init__(self, coin: str, total: str, available: str, locked: str):
-		self.coin = coin
-		self.total = total
-		self.available = available
-		self.locked = locked
+class AccountBalance:
+	"""per-asset balance from spotClearinghouseState with margin health"""
+	def __init__(self, token: str, equity: str, free: str, safe: Option<Decimal>, usable: str, hold: str, margin_used: Option<Decimal>, maintenance: Option<Decimal>):
+		self.token = token
+		self.equity = equity
+		self.free = free
+		self.safe = safe
+		self.usable = usable
+		self.hold = hold
+		self.margin_used = margin_used
+		self.maintenance = maintenance
 
 class UserRateLimit:
 	"""user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint"""
@@ -342,18 +346,8 @@ class GetAccountSnapshot(ABC):
 		pass
 
 	@abstractmethod
-	async def get_collateral(self) -> Result<Decimal, String>:
-		"""get available account collateral"""
-		pass
-
-	@abstractmethod
-	async def get_spot_balance(self) -> Result<Vec<Balance>, String>:
-		"""get all spot wallet balances"""
-		pass
-
-	@abstractmethod
-	async def get_collateral_balance(self, asset: str) -> Result<Balance, String>:
-		"""get clearing house collateral balance (typically USDC only)"""
+	async def get_balance(self) -> Result<Vec<AccountBalance>, String>:
+		"""get all per-asset account balances with margin health"""
 		pass
 
 	@abstractmethod
@@ -390,13 +384,26 @@ class SubscribeUserEvents(ABC):
 		pass
 
 	@abstractmethod
-	async def subscribe_spot_balance(self) -> AsyncIterator[Result<Vec<Balance>, String>]:
+	async def subscribe_spot_balance(self) -> AsyncIterator[Result<Vec<AccountBalance>, String>]:
 		"""subscribe to spot wallet balance updates for the registered user address (requires authentication)"""
 		pass
 
 	@abstractmethod
-	async def subscribe_spot_balance_with_address(self, address: str) -> AsyncIterator[Result<Vec<Balance>, String>]:
+	async def subscribe_spot_balance_with_address(self, address: str) -> AsyncIterator[Result<Vec<AccountBalance>, String>]:
 		"""subscribe to spot wallet balance updates for a specific address"""
+		pass
+
+	@abstractmethod
+	async def unsubscribe_user_events(self) -> None:
+		"""unsubscribe from all user event streams"""
+		pass
+
+
+class SubscribeMarketDataOps(ABC):
+	"""operational helpers for market data subscriptions (unsubscribe)"""
+	@abstractmethod
+	async def unsubscribe_market_data(self, symbol: str) -> None:
+		"""unsubscribe from market data streams for a symbol"""
 		pass
 
 
