@@ -1,7 +1,14 @@
 # Changelog
 All notable changes to both codegen and trading.yaml will be documented in this file.
 
-## [0.1.22] - 2026-04-21
+## [0.1.23] - 2026-04-24
+### Changed
+- **Breaking**: replace `Balance` struct with `AccountBalance` — adds margin health fields (`safe`, `usable`, `margin_used`, `maintenance`)
+- **Breaking**: consolidate `get_collateral`, `get_spot_balance`, `get_collateral_balance` into single `get_balance` returning `Vec<AccountBalance>`
+- **Breaking**: `subscribe_spot_balance` / `subscribe_spot_balance_with_address` now return `Stream<Result<Vec<AccountBalance>, String>>`
+### Added
+- `unsubscribe_user_events` to `SubscribeAccount` trait
+- `SubscribeMarketDataOps` trait with `unsubscribe_market_data`
 ### Added
 - `L2Level` struct (`price: Decimal`, `volume: Decimal`)
 - `L2Snapshot` struct (`symbol`, `bids: Vec<L2Level>`, `asks: Vec<L2Level>`, `sequence`)

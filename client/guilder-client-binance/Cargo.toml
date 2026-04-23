@@ -1,6 +1,6 @@
 [package]
 name = "guilder-client-binance"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "Binance client for the guilder multi-exchange crypto trading library"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -9,7 +9,7 @@ license = "MIT"
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = "0.1.18"
+guilder-abstraction = "0.1.23"
 reqwest.workspace = true
 futures-core.workspace = true
 futures-util = "0.3"

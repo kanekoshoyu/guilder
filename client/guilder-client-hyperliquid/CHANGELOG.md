@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-04-24
+
+- **Breaking**: adapt to `AccountBalance` struct replacing `Balance` — `get_balance` now returns `Vec<AccountBalance>` with margin health fields (`safe`, `usable`, `margin_used`, `maintenance`)
+- **Breaking**: remove `get_collateral`, `get_spot_balance`, `get_collateral_balance` in favor of unified `get_balance`
+- **Breaking**: `subscribe_spot_balance` / `subscribe_spot_balance_with_address` now return `Stream<Result<Vec<AccountBalance>, String>>`
+- Add `unsubscribe_user_events` to `SubscribeAccount` impl
+- Add `SubscribeMarketDataOps` impl with `unsubscribe_market_data`
+- Add `check_balance.rs` example
+
 ## 0.5.1 — 2026-04-22
 
 - Improve shared WebSocket connection recovery with a connection-level idle watchdog for half-open/silent sockets

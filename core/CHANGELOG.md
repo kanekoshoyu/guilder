@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0 — 2026-04-24
+
+- **Breaking**: adapt to `AccountBalance` replacing `Balance` in abstraction layer
+- Suppress orderbook sync warnings when engine is not `Active` (avoids noise during initialization/shutdown)
+
 ## 0.7.1 — 2026-04-22
 
 - Fix orderbook reconciliation self-deadlock by removing the read-then-write `DashMap` pattern and moving shared orderbook state to `RwLock<HashMap<...>>`
