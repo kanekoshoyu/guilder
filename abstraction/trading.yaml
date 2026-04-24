@@ -154,6 +154,10 @@ traits:
           - name: user
             type: String
 
+      - name: unsubscribe_all
+        description: unsubscribe from all market data streams (graceful shutdown)
+        return_type: "()"
+
   - name: GetAccountSnapshot
     description: query authenticated account snapshot
     async: true

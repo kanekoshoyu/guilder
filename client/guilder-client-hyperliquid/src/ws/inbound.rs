@@ -387,7 +387,7 @@ impl HyperliquidWsInboundMessage {
                 let free = equity - hold;
                 Some(AccountBalance {
                     token: b.coin.clone(),
-                    balance: equity,
+                    equity,
                     free,
                     safe: None,
                     usable: free,

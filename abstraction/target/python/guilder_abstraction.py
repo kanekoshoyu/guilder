@@ -332,6 +332,11 @@ class SubscribeMarketData(ABC):
 		"""subscribe to liquidation events for a user address"""
 		pass
 
+	@abstractmethod
+	async def unsubscribe_all(self) -> None:
+		"""unsubscribe from all market data streams (graceful shutdown)"""
+		pass
+
 
 class GetAccountSnapshot(ABC):
 	"""query authenticated account snapshot"""

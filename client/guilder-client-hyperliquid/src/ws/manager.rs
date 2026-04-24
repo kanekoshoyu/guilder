@@ -203,6 +203,10 @@ struct ManagedSubscription {
     total_messages: u64,
 }
 
+/// Special error message sent to all subscribers during graceful shutdown.
+/// Sync loops detect this and exit immediately without reconnecting.
+pub const SHUTDOWN_MARKER: &str = "__orderbook_shutting_down__";
+
 enum ManagerCommand {
     Acquire {
         subscription: HyperliquidSubscription,
@@ -211,6 +215,9 @@ enum ManagerCommand {
     Release {
         subscription: HyperliquidSubscription,
     },
+    /// Graceful shutdown: close all broadcast channels so subscribers exit
+    /// without attempting to reconnect. The manager task exits after this.
+    Shutdown,
 }
 
 impl HyperliquidWsManager {
@@ -269,6 +276,14 @@ impl HyperliquidWsManager {
         for sub in variants {
             let _ = self.cmd_tx.send(ManagerCommand::Release { subscription: sub });
         }
+    }
+
+    /// Graceful shutdown: close all broadcast channels with a shutdown marker
+    /// so subscribers exit immediately without reconnecting.
+    /// The manager task will process this command, close all subscriptions,
+    /// and then exit.
+    pub(crate) fn shutdown(&self) {
+        let _ = self.cmd_tx.send(ManagerCommand::Shutdown);
     }
 }
 
@@ -460,6 +475,19 @@ async fn handle_command(
                         warn!(error = %err, subscription = ?subscription, "WS unsubscribe failed");
                     }
                 }
+            }
+        }
+        ManagerCommand::Shutdown => {
+            // Close all broadcast channels with a shutdown marker so subscribers
+            // exit immediately without attempting to reconnect.
+            for (sub, managed) in subscriptions.drain() {
+                if let Some(coin) = sub.unsubscribe_symbol() {
+                    unsubscribed_coins.insert(coin, Instant::now());
+                }
+                let _ = managed.sender.send(Err(SHUTDOWN_MARKER.to_string()));
+            }
+            if ws.is_connected() {
+                let _ = ws.close().await;
             }
         }
     }

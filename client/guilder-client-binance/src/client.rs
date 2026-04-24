@@ -137,6 +137,10 @@ impl guilder_abstraction::SubscribeMarketData for BinanceClient {
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>> {
         Box::pin(stream::pending())
     }
+
+    async fn unsubscribe_all(&self) {
+        unimplemented!()
+    }
 }
 
 #[allow(unused_variables)]

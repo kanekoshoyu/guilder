@@ -1392,6 +1392,12 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
             }
         }))
     }
+
+    /// Gracefully shut down all market data subscriptions.
+    /// Closes all broadcast channels so subscribers exit without reconnecting.
+    async fn unsubscribe_all(&self) {
+        self.market_ws_manager.shutdown();
+    }
 }
 
 fn subscribe_user_stream<T, F>(
@@ -1587,7 +1593,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
                 Ok(guilder_abstraction::AccountBalance {
                     token: balance.coin,
-                    balance: equity,
+                    equity,
                     free,
                     safe,
                     usable,

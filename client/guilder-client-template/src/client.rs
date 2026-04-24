@@ -111,6 +111,10 @@ impl guilder_abstraction::SubscribeMarketData for ExchangeClient {
         Box::pin(stream::empty())
     }
 
+    async fn unsubscribe_all(&self) -> () {
+        Err("not implemented".to_string())
+    }
+
 }
 
 #[allow(unused_variables)]

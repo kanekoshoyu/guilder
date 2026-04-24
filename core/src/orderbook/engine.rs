@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, Semaphore};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::convert::apply_snapshot;
 use super::error::EngineError;
@@ -191,25 +191,22 @@ where
                 }
 
                 for symbol in &symbols {
-                    let rest_snapshot = match fetch_rest_book(client.as_ref(), &rest_semaphore, symbol).await
-                    {
-                        Some(s) => s,
-                        None => {
-                            health
-                                .write()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(
-                                symbol.clone(),
-                                ReconciliationHealth {
-                                    drift_detected: false,
-                                    last_validation: Instant::now(),
-                                    mismatch_levels: 0,
-                                    corrected: false,
-                                },
-                            );
-                            continue;
-                        }
-                    };
+                    let rest_snapshot =
+                        match fetch_rest_book(client.as_ref(), &rest_semaphore, symbol).await {
+                            Some(s) => s,
+                            None => {
+                                health.write().unwrap_or_else(|e| e.into_inner()).insert(
+                                    symbol.clone(),
+                                    ReconciliationHealth {
+                                        drift_detected: false,
+                                        last_validation: Instant::now(),
+                                        mismatch_levels: 0,
+                                        corrected: false,
+                                    },
+                                );
+                                continue;
+                            }
+                        };
 
                     // Compare local vs REST. Keep the read guard scoped to this
                     // block so it is definitely dropped before any later
@@ -253,10 +250,7 @@ where
                         total_corrections.fetch_add(1, Ordering::Relaxed);
                     }
 
-                    health
-                        .write()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(
+                    health.write().unwrap_or_else(|e| e.into_inner()).insert(
                         symbol.clone(),
                         ReconciliationHealth {
                             drift_detected: mismatches > 0,
@@ -323,11 +317,9 @@ where
                             "orderbook stale — no update received"
                         );
                     }
-
                 }
             }
         });
-
     }
 
     /// Mark the provided engine status as `Active` once every tracked symbol
@@ -368,7 +360,6 @@ where
         if !self.skip_initial_snapshot {
             self.snapshot_symbols(&symbols).await?;
         }
-
 
         let mut futures: Vec<_> = symbols
             .into_iter()
@@ -442,7 +433,7 @@ where
                     result = futures::future::select_all(&mut futures) => {
                         let (_, idx, _) = result;
                         let _ = futures.remove(idx);
-                        warn!(
+                        debug!(
                             active_sync_loops = futures.len(),
                             "orderbook sync_loop finished and was removed from track loop"
                         );
@@ -482,14 +473,14 @@ where
                 let result = futures::future::select_all(&mut futures).await;
                 let (_, idx, _) = result;
                 let _ = futures.remove(idx);
-                warn!(
+                debug!(
                     active_sync_loops = futures.len(),
                     "orderbook sync_loop finished and was removed from track loop"
                 );
             }
         }
 
-        warn!("orderbook track loop exited");
+        debug!("orderbook track loop exited");
         Ok(())
     }
 
@@ -537,7 +528,11 @@ where
 
     /// Returns the top `depth` levels per side for a symbol.
     /// If `depth` is `None`, returns all levels.
-    pub fn snapshot(&self, symbol: &str, depth: Option<usize>) -> Option<Vec<(Side, Decimal, Decimal)>> {
+    pub fn snapshot(
+        &self,
+        symbol: &str,
+        depth: Option<usize>,
+    ) -> Option<Vec<(Side, Decimal, Decimal)>> {
         let books = self.books.read().unwrap_or_else(|e| e.into_inner());
         let book = books.get(symbol)?;
         Some(book.snapshot(depth))
@@ -584,6 +579,12 @@ where
         let books = self.books.read().unwrap_or_else(|e| e.into_inner());
         let book = books.get(symbol)?;
         book.imbalance(top_n)
+    }
+
+    /// Gracefully shut down all orderbook subscriptions.
+    /// Closes all broadcast channels so sync loops exit without reconnecting.
+    pub async fn unsubscribe_all(&self) {
+        self.client.unsubscribe_all().await;
     }
 }
 
@@ -708,7 +709,11 @@ mod tests {
         book.update_bid(dec!(100), dec!(10));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(10))], vec![(dec!(101), dec!(5))]);
+        let rest = make_snapshot(
+            "BTC",
+            vec![(dec!(100), dec!(10))],
+            vec![(dec!(101), dec!(5))],
+        );
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 0);
@@ -721,7 +726,11 @@ mod tests {
         book.update_bid(dec!(100), dec!(10));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(8))], vec![(dec!(101), dec!(5))]);
+        let rest = make_snapshot(
+            "BTC",
+            vec![(dec!(100), dec!(8))],
+            vec![(dec!(101), dec!(5))],
+        );
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 1);
@@ -735,7 +744,11 @@ mod tests {
         book.update_bid(dec!(99), dec!(5));
         book.update_ask(dec!(101), dec!(5));
 
-        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(10))], vec![(dec!(101), dec!(5))]);
+        let rest = make_snapshot(
+            "BTC",
+            vec![(dec!(100), dec!(10))],
+            vec![(dec!(101), dec!(5))],
+        );
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 1);
@@ -762,7 +775,11 @@ mod tests {
     #[test]
     fn test_compare_books_empty_local() {
         let book = Orderbook::new();
-        let rest = make_snapshot("BTC", vec![(dec!(100), dec!(10))], vec![(dec!(101), dec!(5))]);
+        let rest = make_snapshot(
+            "BTC",
+            vec![(dec!(100), dec!(10))],
+            vec![(dec!(101), dec!(5))],
+        );
 
         let (mismatches, needs_replace) = compare_books(&book, &rest);
         assert_eq!(mismatches, 2);

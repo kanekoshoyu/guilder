@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use tokio::sync::{broadcast, Semaphore};
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{debug, error, warn};
 
 use super::convert::{apply_snapshot, apply_update, snapshot_to_book_updates};
 use super::storage::PriceLevelStorage;
@@ -15,6 +15,10 @@ use super::types::{BookUpdate, Orderbook};
 
 const LOOP_WATCHDOG_MS: u128 = 60_000;
 const WAIT_TIMING_WARN_MS: u128 = 5_000;
+
+/// Error marker sent by the WS manager during graceful shutdown.
+/// Sync loops detect this and exit immediately without reconnecting.
+const SHUTDOWN_MARKER: &str = "__orderbook_shutting_down__";
 
 fn is_transport_reset(error: &str) -> bool {
     error.contains("Connection reset")
@@ -36,7 +40,7 @@ where
     S: PriceLevelStorage + Default,
     C: GetMarketData,
 {
-    info!(symbol = symbol, "orderbook REST snapshot requested");
+    debug!(symbol = symbol, "orderbook REST snapshot requested");
     let start = std::time::Instant::now();
     let _permit = rest_semaphore.acquire().await.ok()?;
     let snapshot = client.get_l2_orderbook(symbol.to_owned()).await.ok()?;
@@ -53,7 +57,7 @@ where
         .unwrap_or_else(|e| e.into_inner())
         .insert(symbol.to_owned(), Utc::now());
     let elapsed = start.elapsed();
-    info!(
+    debug!(
         symbol = symbol,
         levels = n_levels,
         exchange_ts = seq,
@@ -79,6 +83,7 @@ pub(crate) async fn sync_loop<S, C>(
 {
     let mut msg_count: u64 = 0;
     let mut reconnect_delay = std::time::Duration::from_secs(1);
+    let mut shutting_down = false;
 
     loop {
         let mut update_stream =
@@ -86,6 +91,7 @@ pub(crate) async fn sync_loop<S, C>(
         let mut snapshot_stream =
             ws_is_source_of_truth.then(|| client.subscribe_l2_snapshot(symbol.clone()));
         let mut last_seq: Option<i64> = None;
+        let mut last_error: Option<String> = None;
         loop {
             let timeout = tokio::time::sleep(std::time::Duration::from_millis(
                 LOOP_WATCHDOG_MS.try_into().unwrap(),
@@ -181,6 +187,13 @@ pub(crate) async fn sync_loop<S, C>(
                             }
                         }
                         StreamEvent::Snapshot(Err(e)) | StreamEvent::Update(Err(e)) => {
+                            // Detect shutdown marker — exit outer loop immediately.
+                            if e == SHUTDOWN_MARKER {
+                                shutting_down = true;
+                                debug!(symbol = %symbol, "orderbook sync_loop received shutdown signal");
+                                break;
+                            }
+
                             let is_reset = is_transport_reset(&e);
                             if is_reset {
                                 warn!(
@@ -211,6 +224,7 @@ pub(crate) async fn sync_loop<S, C>(
                                 .await;
                             }
                             // Break to outer loop — fresh stream after reconnect.
+                            last_error = Some(e);
                             break;
                         }
                     }
@@ -232,10 +246,15 @@ pub(crate) async fn sync_loop<S, C>(
             }
         }
 
+        if shutting_down {
+            break;
+        }
+
         if status.get() == EngineStatus::Active {
             warn!(
                 symbol = symbol,
                 msg_count = msg_count,
+                last_error = ?last_error,
                 "orderbook WS stream ended, reconnecting"
             );
         }
