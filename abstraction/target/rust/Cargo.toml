@@ -1,6 +1,6 @@
 [package]
 name = "guilder-abstraction"
-version = "0.1.23"
+version = "0.1.24"
 edition = "2021"
 description = "multi-exchange crypto trading trait"
 authors = ["Sho Kaneko <kanekoshoyu@gmail.com>"]
@@ -8,6 +8,7 @@ repository = "https://github.com/kanekoshoyu/guilder"
 license = "MIT"
 
 [dependencies]
+async-trait = "0.1"
 futures-core = { workspace = true }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }

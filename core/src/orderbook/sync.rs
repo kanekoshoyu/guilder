@@ -20,6 +20,11 @@ const WAIT_TIMING_WARN_MS: u128 = 5_000;
 /// Sync loops detect this and exit immediately without reconnecting.
 const SHUTDOWN_MARKER: &str = "__orderbook_shutting_down__";
 
+/// Check if an error indicates shutdown (either explicit marker or subscription closed).
+fn is_shutdown_error(e: &str) -> bool {
+    e == SHUTDOWN_MARKER || e == "websocket subscription closed"
+}
+
 fn is_transport_reset(error: &str) -> bool {
     error.contains("Connection reset")
         || error.contains("without closing handshake")
@@ -187,8 +192,8 @@ pub(crate) async fn sync_loop<S, C>(
                             }
                         }
                         StreamEvent::Snapshot(Err(e)) | StreamEvent::Update(Err(e)) => {
-                            // Detect shutdown marker — exit outer loop immediately.
-                            if e == SHUTDOWN_MARKER {
+                            // Detect shutdown — exit outer loop immediately without warnings.
+                            if is_shutdown_error(&e) {
                                 shutting_down = true;
                                 debug!(symbol = %symbol, "orderbook sync_loop received shutdown signal");
                                 break;
@@ -196,22 +201,24 @@ pub(crate) async fn sync_loop<S, C>(
 
                             let is_reset = is_transport_reset(&e);
                             if is_reset {
-                                warn!(
-                                    symbol = symbol,
-                                    error = %e,
-                                    "orderbook WS transport reset detected, reconnecting immediately"
-                                );
+                                if !shutting_down {
+                                    warn!(
+                                        symbol = symbol,
+                                        error = %e,
+                                        "orderbook WS transport reset detected, reconnecting immediately"
+                                    );
+                                }
                                 reconnect_delay = std::time::Duration::from_millis(50);
                             } else {
                                 reconnect_delay = std::time::Duration::from_secs(1);
-                                if status.get() == EngineStatus::Active {
+                                if status.get() == EngineStatus::Active && !shutting_down {
                                     warn!(symbol = symbol, error = %e, "orderbook stream yielded error");
                                     error!(symbol = symbol, error = %e, "orderbook WS stream error, reconnecting");
                                 }
                             }
                             if !ws_is_source_of_truth {
                                 // REST re-snapshot before resubscribing.
-                                if status.get() == EngineStatus::Active {
+                                if status.get() == EngineStatus::Active && !shutting_down {
                                     warn!(symbol = symbol, "REST resnapshot + resubscribe");
                                 }
                                 let _ = resnapshot(
@@ -233,8 +240,8 @@ pub(crate) async fn sync_loop<S, C>(
                 _ = timeout => {
                     let wait_elapsed_ms = wait_started.elapsed().as_millis();
                     // No WS data for 5s — only warn once the symbol is Active.
-                    // Suppress during Initializing (subscriptions warming up).
-                    if status.get() == EngineStatus::Active {
+                    // Suppress during Initializing (subscriptions warming up) and shutdown.
+                    if status.get() == EngineStatus::Active && !shutting_down {
                         warn!(
                             symbol = symbol,
                             wait_elapsed_ms = wait_elapsed_ms,
@@ -250,7 +257,7 @@ pub(crate) async fn sync_loop<S, C>(
             break;
         }
 
-        if status.get() == EngineStatus::Active {
+        if status.get() == EngineStatus::Active && !shutting_down {
             warn!(
                 symbol = symbol,
                 msg_count = msg_count,

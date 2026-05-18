@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use futures_core::Stream;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -313,7 +314,7 @@ pub struct UserRateLimit {
 }
 
 /// test server network connection
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait TestServer {
     /// test ping
@@ -323,7 +324,7 @@ pub trait TestServer {
 }
 
 /// get market data such as symbol, price and volume
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait GetMarketData {
     /// get symbol, such as BTCUSD
@@ -347,7 +348,7 @@ pub trait GetMarketData {
 }
 
 /// place, change, cancel order
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait ManageOrder {
     /// place order with optional client order ID for end-to-end tracking
@@ -377,7 +378,7 @@ pub trait ManageOrder {
 }
 
 /// subscribe to streaming market data
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait SubscribeMarketData {
     /// subscribe to L2 orderbook updates for a symbol
@@ -391,11 +392,11 @@ pub trait SubscribeMarketData {
     /// subscribe to liquidation events for a user address
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>>;
     /// unsubscribe from all market data streams (graceful shutdown)
-    async fn unsubscribe_all(&self) -> ();
+    async fn unsubscribe_all(&self);
 }
 
 /// query authenticated account snapshot
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait GetAccountSnapshot {
     /// get current open positions
@@ -409,7 +410,7 @@ pub trait GetAccountSnapshot {
 }
 
 /// subscribe to authenticated user account events
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait SubscribeUserEvents {
     /// stream executions of the user's own orders
@@ -430,13 +431,13 @@ pub trait SubscribeUserEvents {
         address: String,
     ) -> BoxStream<Result<Vec<AccountBalance>, String>>;
     /// unsubscribe from all user event streams
-    async fn unsubscribe_user_events(&self) -> ();
+    async fn unsubscribe_user_events(&self);
 }
 
 /// operational helpers for market data subscriptions (unsubscribe)
-#[allow(async_fn_in_trait)]
+#[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait SubscribeMarketDataOps {
     /// unsubscribe from market data streams for a symbol
-    async fn unsubscribe_market_data(&self, symbol: String) -> ();
+    async fn unsubscribe_market_data(&self, symbol: String);
 }

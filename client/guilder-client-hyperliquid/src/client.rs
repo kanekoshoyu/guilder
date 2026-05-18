@@ -3,6 +3,7 @@ use crate::ws::manager::{
     managed_stream, HyperliquidSubscription, HyperliquidWsManager, WsSendRateLimiter,
 };
 use crate::ws::{HyperliquidWsBook, HyperliquidWsInboundMessage};
+use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use guilder_abstraction::{
     self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Level, L2Snapshot, L2Update,
@@ -685,7 +686,7 @@ fn sign_action(
 
 // --- Trait implementations ---
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 impl guilder_abstraction::TestServer for HyperliquidClient {
     /// Sends a lightweight allMids request; returns true if the server responds 200 OK.
     async fn ping(&self) -> Result<bool, String> {
@@ -704,7 +705,7 @@ impl guilder_abstraction::TestServer for HyperliquidClient {
     }
 }
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 impl guilder_abstraction::GetMarketData for HyperliquidClient {
     /// Returns all perpetual asset names from Hyperliquid's meta endpoint.
     async fn get_symbol(&self) -> Result<Vec<String>, String> {
@@ -942,7 +943,7 @@ impl guilder_abstraction::GetMarketData for HyperliquidClient {
     }
 }
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 impl guilder_abstraction::ManageOrder for HyperliquidClient {
     /// Places an order on Hyperliquid. Requires `with_auth`. Returns an `OrderPlacement` with
     /// the exchange-assigned order ID. Market orders are submitted as aggressive limit orders (IOC).
@@ -1327,7 +1328,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
     }
 }
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
     fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>> {
         Box::pin(stream::iter(vec![Err(format!(
@@ -1443,7 +1444,7 @@ fn get_or_create_user_manager(
         .clone()
 }
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
     /// Returns open positions from `clearinghouseState`. Requires `with_auth`.
     /// Zero-size positions are filtered out. Positive `szi` = long, negative = short.
@@ -1641,7 +1642,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
     }
 }
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>> {
         let Some(addr) = self.user_address.as_ref() else {
@@ -1797,6 +1798,7 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
     }
 }
 
+#[async_trait]
 impl guilder_abstraction::SubscribeMarketDataOps for HyperliquidClient {
     async fn unsubscribe_market_data(&self, symbol: String) {
         self.market_ws_manager.unsubscribe_by_coin(&symbol);

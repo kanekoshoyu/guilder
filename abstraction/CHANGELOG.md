@@ -1,6 +1,21 @@
 # Changelog
 All notable changes to both codegen and trading.yaml will be documented in this file.
 
+## [0.1.24] — 2026-05-18
+
+### Changed
+- **Breaking**: Migrated all traits to use `#[async_trait]` for better cross-platform `Send` guarantees
+  - `TestServer`, `GetMarketData`, `ManageOrder`, `SubscribeMarketData`, `GetAccountSnapshot`, `SubscribeUserEvents`, `SubscribeMarketDataOps`
+  - Method signatures changed from `fn xxx() -> impl Future<Output = ...> + Send + '_` to `async fn xxx()`
+  - This ensures async futures are `Send` when used across thread boundaries (required for stable Rust compilation in Docker)
+- **Breaking**: Removed `use std::future::Future` and `use std::pin::Pin` from trait definitions (now handled by `async-trait`)
+
+### Added
+- `async-trait = "0.1"` dependency for async trait support
+
+### Fixed
+- Docker compilation failures on stable Rust — async futures now properly implement `Send`
+
 ## [0.1.23] - 2026-04-24
 ### Changed
 - **Breaking**: replace `Balance` struct with `AccountBalance` — adds margin health fields (`safe`, `usable`, `margin_used`, `maintenance`)

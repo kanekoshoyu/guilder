@@ -563,12 +563,10 @@ fn dispatch_message(
                         "WS message dropped for recently unsubscribed symbol"
                     );
                 } else {
-                    let is_draining = subscriptions.is_empty();
-                    if is_draining {
-                        tracing::debug!(message = %message_label(msg), "WS message did not match any active subscription (draining)");
-                    } else {
-                        warn!(message = %message_label(msg), "WS message did not match any active subscription");
-                    }
+                    // Messages for unsubscribed coins are expected during shutdown.
+                    // Always log at DEBUG to avoid spam - the grace period check
+                    // above is for cleanup, not for deciding whether to warn.
+                    tracing::debug!(message = %message_label(msg), "WS message for unsubscribed symbol dropped");
                 }
             }
         }
@@ -665,7 +663,9 @@ where
                 }
                 Ok(Err(err)) => yield Err(err),
                 Err(broadcast::error::RecvError::Closed) => {
-                    warn!(subscription = %_release_on_drop.subscription.label(), "managed stream receiver closed");
+                    // This is expected during shutdown when the WS manager closes
+                    // all broadcast channels. Log at DEBUG level to avoid spam.
+                    tracing::debug!(subscription = %_release_on_drop.subscription.label(), "managed stream receiver closed");
                     yield Err("websocket subscription closed".to_string());
                     return;
                 }

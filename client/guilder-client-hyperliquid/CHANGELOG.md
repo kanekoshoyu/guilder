@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.1 — 2026-05-18
+
+### Changed
+- **Breaking**: Migrated all trait implementations to use `#[async_trait]` for `Send` future guarantees
+  - `TestServer`, `GetMarketData`, `ManageOrder`, `SubscribeMarketData`, `GetAccountSnapshot`, `SubscribeUserEvents`, `SubscribeMarketDataOps`
+  - Ensures cross-platform compatibility with stable Rust (fixes Docker compilation issues)
+
+### Added
+- `async-trait = "0.1"` dependency
+
+### Fixed
+- Dead code warnings: added `#[allow(dead_code)]` to unused fields and methods in WebSocket inbound types
+  - `HyperliquidWsSubscriptionResponse::method`
+  - `HyperliquidWsInboundMessage::Unknown { data }`
+  - `channel_name()` and `routing_key()` methods
+
 ## 0.6.0 — 2026-04-24
 
 - **Breaking**: adapt to `AccountBalance` struct replacing `Balance` — `get_balance` now returns `Vec<AccountBalance>` with margin health fields (`safe`, `usable`, `margin_used`, `maintenance`)

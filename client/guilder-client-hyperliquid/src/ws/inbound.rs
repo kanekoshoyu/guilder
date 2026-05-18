@@ -157,6 +157,7 @@ pub(crate) struct HyperliquidWsEnvelope {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) struct HyperliquidWsSubscriptionResponse {
     #[serde(default)]
     pub(crate) method: Option<String>,
@@ -181,7 +182,7 @@ pub(crate) enum HyperliquidWsInboundMessage {
     OrderUpdates(Vec<HyperliquidWsOrderUpdate>),
     NonFundingLedger(HyperliquidWsLedgerUpdates),
     SubscriptionResponse(HyperliquidWsSubscriptionResponse),
-    Unknown { channel: String, data: Value },
+    Unknown { channel: String, #[allow(dead_code)] data: Value },
 }
 
 impl TryFrom<HyperliquidWsEnvelope> for HyperliquidWsInboundMessage {
@@ -498,6 +499,7 @@ impl HyperliquidWsInboundMessage {
     }
 
     /// Return the channel name for SubKey routing.
+    #[allow(dead_code)]
     pub fn channel_name(&self) -> &str {
         match self {
             HyperliquidWsInboundMessage::Pong => "pong",
@@ -513,6 +515,7 @@ impl HyperliquidWsInboundMessage {
     }
 
     /// Return the routing key (coin or user address) for SubKey lookup.
+    #[allow(dead_code)]
     pub fn routing_key(&self) -> Option<String> {
         match self {
             HyperliquidWsInboundMessage::L2Book(book) => Some(book.coin.clone()),
