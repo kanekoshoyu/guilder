@@ -249,6 +249,12 @@ struct ClearinghouseStateResponse {
 #[allow(dead_code)]
 struct MarginSummary {
     account_value: String,
+    #[serde(default)]
+    total_ntl_pos: Option<String>,
+    #[serde(default)]
+    total_raw_usd: Option<String>,
+    #[serde(default)]
+    total_margin_used: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1531,6 +1537,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
     }
 
     /// Returns all per-asset balances from `spotClearinghouseState` with margin health.
+    /// Also fetches `clearinghouseState` to populate `margin_used` on the USDC entry.
     /// Requires `with_auth`.
     async fn get_balance(&self) -> Result<Vec<guilder_abstraction::AccountBalance>, String> {
         let user = self.require_user_address()?;
@@ -1575,6 +1582,29 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             })
             .collect();
 
+        // Fetch perp-side margin summary for margin_used.
+        // clearinghouseState → weight 2. Failure is non-fatal — margin_used
+        // stays None for all entries.
+        let perp_margin_used: Option<Decimal> = match self
+            .info_post(
+                serde_json::json!({"type": "clearinghouseState", "user": user}),
+                2,
+                "get_balance_margin",
+            )
+            .await
+        {
+            Ok(resp) => parse_response::<ClearinghouseStateResponse>(resp)
+                .await
+                .ok()
+                .and_then(|ch| {
+                    ch.margin_summary
+                        .total_margin_used
+                        .as_deref()
+                        .and_then(parse_decimal)
+                }),
+            Err(_) => None,
+        };
+
         state
             .balances
             .into_iter()
@@ -1592,6 +1622,13 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
                 };
                 let maintenance = safe.map(|s| equity - s);
 
+                // margin_used is account-level (perp side); only populate on USDC.
+                let margin_used = if balance.coin == "USDC" {
+                    perp_margin_used
+                } else {
+                    None
+                };
+
                 Ok(guilder_abstraction::AccountBalance {
                     token: balance.coin,
                     equity,
@@ -1599,7 +1636,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
                     safe,
                     usable,
                     hold,
-                    margin_used: None,
+                    margin_used,
                     maintenance,
                 })
             })
