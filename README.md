@@ -86,6 +86,86 @@ let imbalance = engine.imbalance("BTC", Some(10));
 | `SubscribeMarketData` | Stream L2 updates, fills, asset context, liquidations |
 | `SubscribeUserEvents` | Stream user fills, order updates, funding, deposits, withdrawals |
 
+## External Signing
+
+Exchange clients need to sign requests (e.g. Hyperliquid uses EIP-712). Guilder supports two authentication modes:
+
+### Direct key (`with_auth`)
+
+```rust
+let client = HyperliquidClient::with_auth("0xYourAddress", "your-private_key_hex");
+```
+
+The private key is stored in memory and used internally for signing. Fine for development, but the key is exposed to the process.
+
+### External signer (`with_external_signer`)
+
+```rust
+use guilder_abstraction::{EcdsaSignature, ExternalSigner};
+
+struct MyHardwareSigner { /* ... */ }
+
+#[async_trait]
+impl ExternalSigner for MyHardwareSigner {
+    async fn sign_prehash(&self, digest: &[u8; 32]) -> Result<EcdsaSignature, String> {
+        // Send the 32-byte digest to your TPM / Secure Enclave / HSM
+        // The hardware signs it internally and returns (r, s, v)
+    }
+
+    fn signer_address(&self) -> String {
+        "0xYourAddress".to_string()
+    }
+}
+
+let signer: Arc<dyn ExternalSigner> = Arc::new(MyHardwareSigner { /* ... */ });
+let client = HyperliquidClient::with_external_signer("0xYourAddress", signer);
+```
+
+The private key **never leaves the hardware**. The client computes the digest, sends it to the signer, and gets back the signature.
+
+### How it works
+
+```
+┌─────────────────┐         ┌──────────────────┐
+│ HyperliquidClient│         │  ExternalSigner   │
+│                  │  digest │  (TPM / Enclave)  │
+│  1. Build action ├────────►│                   │
+│  2. Compute      │         │  3. sign_prehash  │
+│     EIP-712      │◄────────┤     (r, s, v)     │
+│     digest       │  sig    │                   │
+│                  │         │  (key never       │
+│  4. Submit       │         │   leaves hw)      │
+│     signed tx    │         └──────────────────┘
+└─────────────────┘
+```
+
+The digest computation is exchange-specific (Hyperliquid: msgpack → keccak → EIP-712 struct hash). The `ExternalSigner` trait is exchange-agnostic — it just signs a 32-byte hash and returns a secp256k1 ECDSA signature. This means the same signer can work with any exchange client that needs ECDSA signing.
+
+### Implementing a signer
+
+Your signer needs to:
+
+1. **Hold or reference a secp256k1 key** — in hardware (TPM, Secure Enclave), an HSM, or a daemon process.
+2. **Sign a 32-byte prehash** — return an `EcdsaSignature { r: [u8; 32], s: [u8; 32], v: u8 }`.
+3. **Return the wallet address** — derived from the public key, used for authentication.
+
+The `v` field is the recovery ID (0 or 1), **not** the EIP-155 `v` value. The client adds 27 to produce the final `v` for the exchange API.
+
+### Self-test with address recovery
+
+A good practice is to verify your signer works by signing a known digest and recovering the public key from the signature:
+
+```rust
+let digest = keccak256(b"self-test-message");
+let sig = signer.sign_prehash(&digest).await?;
+
+// Recover public key from (digest, signature, recovery_id)
+// Derive address from recovered public key
+// Assert: recovered_address == signer.signer_address()
+```
+
+If the recovered address matches, the entire signing pipeline is correct — digest computation, ECDSA math, and recovery ID are all verified.
+
 ## Implementation status
 
 | Trait | Hyperliquid | Binance |
