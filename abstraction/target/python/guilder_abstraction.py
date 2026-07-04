@@ -412,3 +412,29 @@ class SubscribeMarketDataOps(ABC):
 		pass
 
 
+class EcdsaSignature:
+	"""ECDSA recoverable signature (secp256k1), returned by external signers."""
+	def __init__(self, r: bytes, s: bytes, v: int):
+		self.r = r
+		self.s = s
+		self.v = v
+
+
+class ExternalSigner(ABC):
+	"""External signer trait for hardware-backed or custom signing backends.
+
+	This trait allows exchange clients to delegate the actual cryptographic signing
+	to an external provider (TPM, Secure Enclave, HSM, etc.) without ever exposing
+	the raw private key. The client computes the digest; the signer signs it.
+	"""
+	@abstractmethod
+	async def sign_prehash(self, digest: bytes) -> EcdsaSignature:
+		"""Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains)."""
+		pass
+
+	@abstractmethod
+	def signer_address(self) -> str:
+		"""Get the signer's wallet/chain address (used for authentication)."""
+		pass
+
+

@@ -6,9 +6,9 @@ use crate::ws::{HyperliquidWsBook, HyperliquidWsInboundMessage};
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use guilder_abstraction::{
-    self, AssetContext, BoxStream, Deposit, Fill, FundingPayment, L2Level, L2Snapshot, L2Update,
-    Liquidation, OpenOrder, OrderPlacement, OrderSide, OrderType, OrderUpdate, Position,
-    PredictedFunding, TimeInForce, UserFill, Withdrawal,
+    self, AssetContext, BoxStream, Deposit, EcdsaSignature, ExternalSigner, Fill, FundingPayment,
+    L2Level, L2Snapshot, L2Update, Liquidation, OpenOrder, OrderPlacement, OrderSide, OrderType,
+    OrderUpdate, Position, PredictedFunding, TimeInForce, UserFill, Withdrawal,
 };
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -49,6 +49,7 @@ pub struct HyperliquidClient {
     client: Client,
     user_address: Option<String>,
     private_key: Option<String>,
+    external_signer: Option<Arc<dyn ExternalSigner>>,
     rest_limiter: Arc<RestRateLimiter>,
     address_limiter: Arc<AddressRateLimiter>,
     market_ws_manager: HyperliquidWsManager,
@@ -69,6 +70,7 @@ impl HyperliquidClient {
             client: Client::new(),
             user_address: None,
             private_key: None,
+            external_signer: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
             market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
@@ -83,6 +85,30 @@ impl HyperliquidClient {
             client: Client::new(),
             user_address: Some(user_address.into()),
             private_key: Some(private_key),
+            external_signer: None,
+            rest_limiter: Arc::new(RestRateLimiter::new()),
+            address_limiter: Arc::new(AddressRateLimiter::new()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
+            user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
+            ws_send_limiter,
+        }
+    }
+
+    /// Create a client authenticated via an external signer (TPM, Secure Enclave, etc.).
+    ///
+    /// The signer handles the actual ECDSA signing; the private key never leaves
+    /// the hardware. The client computes the EIP-712 digest and delegates signing
+    /// to the external signer.
+    pub fn with_external_signer(
+        user_address: impl Into<String>,
+        signer: Arc<dyn ExternalSigner>,
+    ) -> Self {
+        let ws_send_limiter = WsSendRateLimiter::new();
+        HyperliquidClient {
+            client: Client::new(),
+            user_address: Some(user_address.into()),
+            private_key: None,
+            external_signer: Some(signer),
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
             market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
@@ -127,10 +153,14 @@ impl HyperliquidClient {
             .ok_or_else(|| "user address required: use HyperliquidClient::with_auth".to_string())
     }
 
-    fn require_private_key(&self) -> Result<&str, String> {
+    fn require_private_key(&self) -> Result<Option<&str>, String> {
+        if self.external_signer.is_some() {
+            return Ok(None);
+        }
         self.private_key
             .as_deref()
-            .ok_or_else(|| "private key required: use HyperliquidClient::with_auth".to_string())
+            .map(Some)
+            .ok_or_else(|| "private key or external signer required: use with_auth or with_external_signer".to_string())
     }
 
     async fn get_asset_index(&self, symbol: &str) -> Result<usize, String> {
@@ -156,7 +186,14 @@ impl HyperliquidClient {
             .unwrap()
             .as_millis() as u64;
 
-        let (r, s, v) = sign_action(private_key, &action, vault_address, nonce)?;
+        let (r, s, v) = sign_action(
+            private_key,
+            self.external_signer.as_ref(),
+            &action,
+            vault_address,
+            nonce,
+        )
+        .await?;
 
         let payload = serde_json::json!({
             "action": action,
@@ -577,15 +614,15 @@ fn build_trigger_order_msgpack(
     buf
 }
 
-/// Sign using pre-built msgpack bytes (bypassing serde_json field ordering).
-fn sign_with_msgpack(
+/// Compute the EIP-712 digest for a Hyperliquid exchange action.
+///
+/// This is the hash that gets signed — extracted so both direct key and
+/// external signer paths can share it.
+fn compute_eip712_digest(
     msgpack: &[u8],
-    private_key: &str,
     nonce: u64,
     vault_address: Option<&str>,
-) -> Result<(String, String, u8), String> {
-    use k256::ecdsa::SigningKey;
-
+) -> Result<[u8; 32], String> {
     let mut data = msgpack.to_vec();
     data.extend_from_slice(&nonce.to_be_bytes());
     match vault_address {
@@ -612,14 +649,30 @@ fn sign_with_msgpack(
     final_data.extend_from_slice(b"\x19\x01");
     final_data.extend_from_slice(&domain_sep);
     final_data.extend_from_slice(&struct_hash);
-    let final_hash = keccak256(&final_data);
+    Ok(keccak256(&final_data))
+}
+
+/// Format an EcdsaSignature into the (r, s, v) hex strings expected by Hyperliquid.
+fn format_ecdsa_signature(sig: &EcdsaSignature) -> (String, String, u8) {
+    let r = format!("0x{}", hex::encode(sig.r));
+    let s = format!("0x{}", hex::encode(sig.s));
+    let v = 27u8 + sig.v;
+    (r, s, v)
+}
+
+/// Sign a digest using a raw private key (direct key mode).
+fn sign_digest_with_key(
+    digest: &[u8; 32],
+    private_key: &str,
+) -> Result<(String, String, u8), String> {
+    use k256::ecdsa::SigningKey;
 
     let key_bytes = hex::decode(private_key.trim_start_matches("0x"))
         .map_err(|e| format!("invalid private key: {}", e))?;
     let signing_key =
         SigningKey::from_bytes(key_bytes.as_slice().into()).map_err(|e| e.to_string())?;
     let (sig, recovery_id) = signing_key
-        .sign_prehash_recoverable(&final_hash)
+        .sign_prehash_recoverable(digest)
         .map_err(|e| e.to_string())?;
 
     let sig_bytes = sig.to_bytes();
@@ -630,64 +683,50 @@ fn sign_with_msgpack(
     Ok((r, s, v))
 }
 
+/// Sign using pre-built msgpack bytes (bypassing serde_json field ordering).
+/// Supports both direct private key and external signer.
+async fn sign_with_msgpack(
+    msgpack: &[u8],
+    private_key: Option<&str>,
+    external_signer: Option<&Arc<dyn ExternalSigner>>,
+    nonce: u64,
+    vault_address: Option<&str>,
+) -> Result<(String, String, u8), String> {
+    let digest = compute_eip712_digest(msgpack, nonce, vault_address)?;
+
+    if let Some(signer) = external_signer {
+        let sig = signer.sign_prehash(&digest).await?;
+        return Ok(format_ecdsa_signature(&sig));
+    }
+
+    let key = private_key.ok_or_else(|| {
+        "no signing method available: provide private_key or external_signer".to_string()
+    })?;
+    sign_digest_with_key(&digest, key)
+}
+
 /// Signs a Hyperliquid exchange action using EIP-712.
 /// Returns (r, s, v) where r and s are "0x"-prefixed hex strings and v is 27 or 28.
-fn sign_action(
-    private_key: &str,
+/// Supports both direct private key and external signer.
+async fn sign_action(
+    private_key: Option<&str>,
+    external_signer: Option<&Arc<dyn ExternalSigner>>,
     action: &Value,
     vault_address: Option<&str>,
     nonce: u64,
 ) -> Result<(String, String, u8), String> {
-    use k256::ecdsa::SigningKey;
-
-    // Step 1: msgpack-encode the action preserving Python dict field order,
-    // then append nonce + vault flag.
     let msgpack_bytes = action_to_canonical_msgpack(action)?;
-    let mut data = msgpack_bytes;
-    data.extend_from_slice(&nonce.to_be_bytes());
-    match vault_address {
-        None => data.push(0u8),
-        Some(addr) => {
-            data.push(1u8);
-            let addr_bytes = hex::decode(addr.trim_start_matches("0x"))
-                .map_err(|e| format!("invalid vault address: {}", e))?;
-            data.extend_from_slice(&addr_bytes);
-        }
+    let digest = compute_eip712_digest(&msgpack_bytes, nonce, vault_address)?;
+
+    if let Some(signer) = external_signer {
+        let sig = signer.sign_prehash(&digest).await?;
+        return Ok(format_ecdsa_signature(&sig));
     }
-    let connection_id = keccak256(&data);
 
-    // Step 2: hash the Agent struct
-    let agent_type_hash = keccak256(b"Agent(string source,bytes32 connectionId)");
-    let source_hash = keccak256(b"a"); // "a" = mainnet
-    let mut struct_data = [0u8; 96];
-    struct_data[..32].copy_from_slice(&agent_type_hash);
-    struct_data[32..64].copy_from_slice(&source_hash);
-    struct_data[64..96].copy_from_slice(&connection_id);
-    let struct_hash = keccak256(&struct_data);
-
-    // Step 3: EIP-712 final hash
-    let domain_sep = hyperliquid_domain_separator();
-    let mut final_data = Vec::with_capacity(66);
-    final_data.extend_from_slice(b"\x19\x01");
-    final_data.extend_from_slice(&domain_sep);
-    final_data.extend_from_slice(&struct_hash);
-    let final_hash = keccak256(&final_data);
-
-    // Step 4: sign with secp256k1
-    let key_bytes = hex::decode(private_key.trim_start_matches("0x"))
-        .map_err(|e| format!("invalid private key: {}", e))?;
-    let signing_key =
-        SigningKey::from_bytes(key_bytes.as_slice().into()).map_err(|e| e.to_string())?;
-    let (sig, recovery_id) = signing_key
-        .sign_prehash_recoverable(&final_hash)
-        .map_err(|e| e.to_string())?;
-
-    let sig_bytes = sig.to_bytes();
-    let r = format!("0x{}", hex::encode(&sig_bytes[..32]));
-    let s = format!("0x{}", hex::encode(&sig_bytes[32..64]));
-    let v = 27u8 + recovery_id.to_byte();
-
-    Ok((r, s, v))
+    let key = private_key.ok_or_else(|| {
+        "no signing method available: provide private_key or external_signer".to_string()
+    })?;
+    sign_digest_with_key(&digest, key)
 }
 
 // --- Trait implementations ---
@@ -1114,7 +1153,14 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             .unwrap()
             .as_millis() as u64;
 
-        let (r, s, v) = sign_with_msgpack(&action_msgpack, private_key, nonce, None)?;
+        let (r, s, v) = sign_with_msgpack(
+            &action_msgpack,
+            private_key,
+            self.external_signer.as_ref(),
+            nonce,
+            None,
+        )
+        .await?;
 
         let payload_str = format!(
             r#"{{"action":{},"nonce":{},"signature":{{"r":"{}","s":"{}","v":{}}},"vaultAddress":null,"expiresAfter":null}}"#,

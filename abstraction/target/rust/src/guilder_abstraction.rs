@@ -441,3 +441,38 @@ pub trait SubscribeMarketDataOps {
     /// unsubscribe from market data streams for a symbol
     async fn unsubscribe_market_data(&self, symbol: String);
 }
+
+/// ECDSA recoverable signature (secp256k1), returned by external signers.
+///
+/// Contains the 64-byte compact signature (r || s) and a recovery ID (0 or 1)
+/// used to derive the signer's public key from the signature.
+#[derive(Debug, Clone)]
+pub struct EcdsaSignature {
+    /// r component, big-endian 32 bytes
+    pub r: [u8; 32],
+    /// s component, big-endian 32 bytes
+    pub s: [u8; 32],
+    /// recovery id (0 or 1)
+    pub v: u8,
+}
+
+/// External signer trait for hardware-backed or custom signing backends.
+///
+/// This trait allows exchange clients to delegate the actual cryptographic signing
+/// to an external provider (TPM, Secure Enclave, HSM, etc.) without ever exposing
+/// the raw private key. The client computes the digest; the signer signs it.
+///
+/// This is complementary to direct key authentication — clients should support both
+/// `with_auth(address, key)` for development and `with_external_signer(address, signer)`
+/// for production use.
+#[async_trait]
+pub trait ExternalSigner: Send + Sync {
+    /// Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains).
+    ///
+    /// Returns an ECDSA recoverable signature. The caller is responsible for
+    /// formatting the signature according to the exchange's requirements.
+    async fn sign_prehash(&self, digest: &[u8; 32]) -> Result<EcdsaSignature, String>;
+
+    /// Get the signer's wallet/chain address (used for authentication).
+    fn signer_address(&self) -> String;
+}
