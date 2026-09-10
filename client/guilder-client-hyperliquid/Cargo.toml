@@ -13,7 +13,7 @@ path = "src/bin/guilder_stress_test.rs"
 
 [dependencies]
 # development: path, deployment: version
-guilder-abstraction = "0.1.23"
+guilder-abstraction = "0.1.25"
 async-trait = "0.1"
 reqwest = { workspace = true, features = ["json"] }
 futures-core.workspace = true
