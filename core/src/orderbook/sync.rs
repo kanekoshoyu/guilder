@@ -14,7 +14,26 @@ use super::storage::PriceLevelStorage;
 use super::types::{BookUpdate, Orderbook};
 
 const LOOP_WATCHDOG_MS: u128 = 60_000;
-const WAIT_TIMING_WARN_MS: u128 = 5_000;
+
+/// Warn when waiting for the next stream item exceeds this multiple of the
+/// symbol's OWN median inter-message gap — inactive symbols with sparse
+/// updates are normal and must not spam the error buffer (2026-09-11: 234
+/// symbols x ~5.4s gaps wall-papered /api/error every ~20s at the fixed 5s
+/// threshold). Absolute floor keeps genuinely-dead streams (no watchdog from
+/// LOOP_WATCHDOG_MS yet) visible in debug logs.
+const WAIT_WARN_BASELINE_MULTIPLE: u128 = 4;
+const WAIT_WARN_FLOOR_MS: u128 = 30_000;
+
+/// Median of the most recent inter-message gaps (0 when no samples yet —
+/// combined with the 30s floor this keeps early-connection logs quiet).
+fn median_of(samples: &[u128]) -> u128 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let mut v = samples.to_vec();
+    v.sort_unstable();
+    v[v.len() / 2]
+}
 
 /// Error marker sent by the WS manager during graceful shutdown.
 /// Sync loops detect this and exit immediately without reconnecting.
@@ -97,6 +116,8 @@ pub(crate) async fn sync_loop<S, C>(
             ws_is_source_of_truth.then(|| client.subscribe_l2_snapshot(symbol.clone()));
         let mut last_seq: Option<i64> = None;
         let mut last_error: Option<String> = None;
+        let mut last_event_at: Option<std::time::Instant> = None;
+        let mut gap_samples: Vec<u128> = Vec::with_capacity(16);
         loop {
             let timeout = tokio::time::sleep(std::time::Duration::from_millis(
                 LOOP_WATCHDOG_MS.try_into().unwrap(),
@@ -113,14 +134,29 @@ pub(crate) async fn sync_loop<S, C>(
                     }
                 } => {
                     let wait_elapsed_ms = wait_started.elapsed().as_millis();
-                    if wait_elapsed_ms >= WAIT_TIMING_WARN_MS
+                    // Sample the inter-message gap (skip the first message of
+                    // a fresh connection — no prior instant to diff against).
+                    if let Some(prev) = last_event_at {
+                        let gap = prev.elapsed().as_millis();
+                        if gap_samples.len() == 16 {
+                            gap_samples.remove(0);
+                        }
+                        gap_samples.push(gap);
+                    }
+                    last_event_at = Some(std::time::Instant::now());
+                    let gap_median_ms = median_of(&gap_samples);
+                    // Adaptive baseline: median of the symbol's own observed
+                    // gaps (from recent wait samples). Sparse books are NORMAL.
+                    if wait_elapsed_ms >= WAIT_WARN_FLOOR_MS
+                        && wait_elapsed_ms >= gap_median_ms * WAIT_WARN_BASELINE_MULTIPLE
                         && status.get() == EngineStatus::Active
                     {
                         warn!(
                             symbol = symbol,
                             wait_elapsed_ms = wait_elapsed_ms,
+                            gap_median_ms = gap_median_ms,
                             ws_is_source_of_truth = ws_is_source_of_truth,
-                            "orderbook sync waited a long time for next stream item"
+                            "orderbook sync waited far longer than this symbol's own cadence"
                         );
                     }
 
