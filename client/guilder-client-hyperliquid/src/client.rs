@@ -254,6 +254,8 @@ struct AssetInfo {
     name: String,
     #[serde(rename = "szDecimals")]
     sz_decimals: i32,
+    #[serde(rename = "isDelisted", default)]
+    is_delisted: bool,
 }
 
 type MetaAndAssetCtxsResponse = (MetaResponse, Vec<RestAssetCtx>);
@@ -2195,5 +2197,55 @@ mod msgpack_tests {
     fn test_msgpack_empty_containers() {
         assert_eq!(value_to_msgpack(&json!([])), vec![0x90]);
         assert_eq!(value_to_msgpack(&json!({})), vec![0x80]);
+    }
+}
+
+
+#[async_trait::async_trait]
+impl guilder_abstraction::ListingEventSource for HyperliquidClient {
+    /// Authoritative lifecycle events from the venue. Hyperliquid's info API
+    /// exposes only the CURRENT universe (+ isDelisted flags) — it has no
+    /// historical listing stream, so this returns one synthetic `list` event
+    /// per never-delisted symbol (event_time unknown → epoch placeholder) and
+    /// a `delist` event per isDelisted symbol. The QDB sync layer upserts
+    /// these into token_registry_events; true FIRST-LISTING times for
+    /// pre-history coins come from earlier sync runs, not from this call.
+    async fn get_listing_events(
+        &self,
+    ) -> Result<Vec<guilder_abstraction::ListingEvent>, String> {
+        // meta → weight 20
+        let resp = self
+            .info_post(serde_json::json!({"type": "meta"}), 20, "get_listing_events")
+            .await?;
+        let meta = parse_response::<MetaResponse>(resp).await?;
+        Ok(meta
+            .universe
+            .into_iter()
+            .map(|a| guilder_abstraction::ListingEvent {
+                ticker: a.name,
+                exchange: "hyperliquid_perp".to_string(),
+                event: if a.is_delisted { "delist" } else { "list" }.to_string(),
+                event_time: String::new(),
+            })
+            .collect())
+    }
+
+    async fn get_current_universe(
+        &self,
+    ) -> Result<Vec<guilder_abstraction::SymbolStatus>, String> {
+        // meta → weight 20
+        let resp = self
+            .info_post(serde_json::json!({"type": "meta"}), 20, "get_current_universe")
+            .await?;
+        let meta = parse_response::<MetaResponse>(resp).await?;
+        Ok(meta
+            .universe
+            .into_iter()
+            .map(|a| guilder_abstraction::SymbolStatus {
+                ticker: a.name,
+                exchange: "hyperliquid_perp".to_string(),
+                is_delisted: a.is_delisted,
+            })
+            .collect())
     }
 }

@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::collections::HashMap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -308,6 +309,7 @@ pub struct UserRateLimit {
 /// test server network connection
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait TestServer {
 	/// test ping
 	async fn ping(&self) -> Result<bool, String>;
@@ -318,6 +320,7 @@ pub trait TestServer {
 /// get market data such as symbol, price and volume
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait GetMarketData {
 	/// get symbol, such as BTCUSD
 	async fn get_symbol(&self) -> Result<Vec<String>, String>;
@@ -342,6 +345,7 @@ pub trait GetMarketData {
 /// place, change, cancel order
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait ManageOrder {
 	/// place order with optional client order ID for end-to-end tracking
 	async fn place_order(&self, symbol: String, side: OrderSide, price: Decimal, volume: Decimal, order_type: OrderType, time_in_force: TimeInForce, trigger_price: Option<Decimal>, reduce_only: bool, cloid: Option<String>) -> Result<OrderPlacement, String>;
@@ -356,6 +360,7 @@ pub trait ManageOrder {
 /// subscribe to streaming market data
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait SubscribeMarketData {
 	/// subscribe to L2 orderbook updates for a symbol
 	fn subscribe_l2_update(&self, symbol: String) -> BoxStream<Result<L2Update, String>>;
@@ -374,6 +379,7 @@ pub trait SubscribeMarketData {
 /// query authenticated account snapshot
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait GetAccountSnapshot {
 	/// get current open positions
 	async fn get_positions(&self) -> Result<Vec<Position>, String>;
@@ -388,6 +394,7 @@ pub trait GetAccountSnapshot {
 /// subscribe to authenticated user account events
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait SubscribeUserEvents {
 	/// stream executions of the user's own orders
 	fn subscribe_user_fills(&self) -> BoxStream<Result<UserFill, String>>;
@@ -410,6 +417,7 @@ pub trait SubscribeUserEvents {
 /// operational helpers for market data subscriptions (unsubscribe)
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait SubscribeMarketDataOps {
 	/// unsubscribe from market data streams for a symbol
 	async fn unsubscribe_market_data(&self, symbol: String) -> ();
@@ -418,6 +426,7 @@ pub trait SubscribeMarketDataOps {
 /// authoritative token lifecycle events (list/delist) straight from the exchange
 #[allow(async_fn_in_trait)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait ListingEventSource {
 	/// full listing/delist event stream; exchange is the single source of truth
 	async fn get_listing_events(&self) -> Result<Vec<ListingEvent>, String>;
@@ -425,3 +434,26 @@ pub trait ListingEventSource {
 	async fn get_current_universe(&self) -> Result<Vec<SymbolStatus>, String>;
 }
 
+/// ECDSA recoverable signature (secp256k1), returned by external signers.
+///
+/// Contains the 64-byte compact signature (r || s) and a recovery ID (0 or 1)
+/// used to derive the signer's public key from the signature.
+#[derive(Debug, Clone)]
+pub struct EcdsaSignature {
+    /// r component, big-endian 32 bytes
+    pub r: [u8; 32],
+    /// s component, big-endian 32 bytes
+    pub s: [u8; 32],
+    /// recovery id (0 or 1)
+    pub v: u8,
+}
+
+/// External signer trait for hardware-backed or custom signing backends.
+#[async_trait]
+pub trait ExternalSigner: Send + Sync {
+    /// Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains).
+    async fn sign_prehash(&self, digest: &[u8; 32]) -> Result<EcdsaSignature, String>;
+
+    /// Get the signer's wallet/chain address (used for authentication).
+    fn signer_address(&self) -> String;
+}
