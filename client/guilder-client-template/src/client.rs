@@ -1,4 +1,4 @@
-use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<L2Snapshot, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<AccountBalance>, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>};
+use guilder_abstraction::{self, Result<bool, String>, Result<i64, String>, Result<Vec<String>, String>, Result<Decimal, String>, Result<AssetContext, String>, Result<Vec<AssetContext>, String>, Result<i32, String>, Result<HashMap<String, i32>, String>, Result<Vec<PredictedFunding>, String>, Result<L2Snapshot, String>, Result<OrderPlacement, String>, OrderSide, OrderType, TimeInForce, Option<Decimal>, Option<String>, Result<(), String>, Result<L2Update, String>, Result<Fill, String>, Result<Liquidation, String>, Result<Vec<Position>, String>, Result<Vec<OpenOrder>, String>, Result<Vec<AccountBalance>, String>, Result<UserRateLimit, String>, Result<UserFill, String>, Result<OrderUpdate, String>, Result<FundingPayment, String>, Result<Deposit, String>, Result<Withdrawal, String>, Result<Vec<ListingEvent>, String>, Result<Vec<SymbolStatus>, String>};
 use futures_util::stream;
 use reqwest::Client;
 
@@ -179,6 +179,19 @@ impl guilder_abstraction::SubscribeUserEvents for ExchangeClient {
 #[allow(async_fn_in_trait)]
 impl guilder_abstraction::SubscribeMarketDataOps for ExchangeClient {
     async fn unsubscribe_market_data(&self, symbol: String) -> () {
+        Err("not implemented".to_string())
+    }
+
+}
+
+#[allow(unused_variables)]
+#[allow(async_fn_in_trait)]
+impl guilder_abstraction::ListingEventSource for ExchangeClient {
+    async fn get_listing_events(&self) -> Result<Vec<ListingEvent>, String> {
+        Err("not implemented".to_string())
+    }
+
+    async fn get_current_universe(&self) -> Result<Vec<SymbolStatus>, String> {
         Err("not implemented".to_string())
     }
 

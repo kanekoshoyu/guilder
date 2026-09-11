@@ -229,6 +229,19 @@ traits:
             type: String
 
 
+  - name: ListingEventSource
+    description: authoritative token lifecycle events (list/delist) straight from the exchange
+    async: true
+    methods:
+      - name: get_listing_events
+        description: full listing/delist event stream; exchange is the single source of truth
+        return_type: Result<Vec<ListingEvent>, String>
+
+      - name: get_current_universe
+        description: tickers tradeable right now (with delist flag where the venue exposes it)
+        return_type: Result<Vec<SymbolStatus>, String>
+
+
 enums:
   - name: Status
     values:
@@ -322,7 +335,31 @@ enums:
         description: fiat currency
 
 
+
+
 structs:
+  - name: ListingEvent
+    description: one lifecycle event for one symbol on one venue
+    values:
+      - name: ticker
+        type: String
+      - name: exchange
+        type: String
+      - name: event
+        type: String
+      - name: event_time
+        type: String
+
+  - name: SymbolStatus
+    description: current tradeable status of one symbol
+    values:
+      - name: ticker
+        type: String
+      - name: exchange
+        type: String
+      - name: is_delisted
+        type: bool
+
   - name: L2Update
     description: single L2 orderbook price level update
     values:
