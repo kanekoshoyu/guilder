@@ -170,6 +170,26 @@ impl HyperliquidClient {
         }
     }
 
+    pub fn with_network_and_external_signer(
+        network: HyperliquidNetwork,
+        user_address: impl Into<String>,
+        signer: Arc<dyn ExternalSigner>,
+    ) -> Self {
+        let ws_send_limiter = WsSendRateLimiter::new();
+        HyperliquidClient {
+            client: Client::new(),
+            network,
+            user_address: Some(user_address.into()),
+            private_key: None,
+            external_signer: Some(signer),
+            rest_limiter: Arc::new(RestRateLimiter::new()),
+            address_limiter: Arc::new(AddressRateLimiter::new()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
+            user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
+            ws_send_limiter,
+        }
+    }
+
     /// Configure rate limit budgets (rest_weight/min, address_requests).
     /// Defaults: 1200 rest weight/min, 10000 address requests.
     pub fn with_budgets(mut self, rest_weight: u32, addr_budget: u64) -> Self {
