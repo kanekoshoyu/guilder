@@ -55,9 +55,9 @@ pub(crate) struct HyperliquidWs {
 }
 
 impl HyperliquidWs {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(url: &'static str) -> Self {
         Self {
-            url: HYPERLIQUID_WS_URL.to_string(),
+            url: url.to_string(),
             stream: None,
             closed: false,
         }
