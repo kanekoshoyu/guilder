@@ -221,9 +221,13 @@ enum ManagerCommand {
 }
 
 impl HyperliquidWsManager {
-    pub(crate) fn new(user_addr: Option<String>, send_limiter: WsSendRateLimiter) -> Self {
+    pub(crate) fn new(
+        user_addr: Option<String>,
+        send_limiter: WsSendRateLimiter,
+        ws_url: &'static str,
+    ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        tokio::spawn(run_manager(cmd_rx, user_addr, send_limiter));
+        tokio::spawn(run_manager(cmd_rx, user_addr, send_limiter, ws_url));
         Self { cmd_tx }
     }
 
@@ -291,8 +295,9 @@ async fn run_manager(
     mut cmd_rx: mpsc::UnboundedReceiver<ManagerCommand>,
     user_addr: Option<String>,
     send_limiter: WsSendRateLimiter,
+    ws_url: &'static str,
 ) {
-    let mut ws = HyperliquidWs::new();
+    let mut ws = HyperliquidWs::new(ws_url);
     let mut subscriptions: HashMap<HyperliquidSubscription, ManagedSubscription> = HashMap::new();
     // Coins recently unsubscribed — messages for these during grace period are silently dropped.
     let mut unsubscribed_coins: HashMap<String, Instant> = HashMap::new();

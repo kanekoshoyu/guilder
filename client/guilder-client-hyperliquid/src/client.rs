@@ -20,6 +20,41 @@ use std::sync::{Arc, RwLock};
 const HYPERLIQUID_INFO_URL: &str = "https://api.hyperliquid.xyz/info";
 const HYPERLIQUID_EXCHANGE_URL: &str = "https://api.hyperliquid.xyz/exchange";
 
+/// REST/WS endpoints, selectable at construction time. `Mainnet` is the
+/// default; `Testnet` points at the official testnet replica
+/// (api.hyperliquid-testnet.xyz) — real order-book mechanics, simulated
+/// balances (faucet-funded). Configurable per Sho 2026-09-21: cleanest at
+/// client construction, not via env or compile-time flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HyperliquidNetwork {
+    /// Production: api.hyperliquid.xyz
+    #[default]
+    Mainnet,
+    /// Official testnet replica: api.hyperliquid-testnet.xyz
+    Testnet,
+}
+
+impl HyperliquidNetwork {
+    pub fn info_url(&self) -> &'static str {
+        match self {
+            Self::Mainnet => HYPERLIQUID_INFO_URL,
+            Self::Testnet => "https://api.hyperliquid-testnet.xyz/info",
+        }
+    }
+    pub fn exchange_url(&self) -> &'static str {
+        match self {
+            Self::Mainnet => HYPERLIQUID_EXCHANGE_URL,
+            Self::Testnet => "https://api.hyperliquid-testnet.xyz/exchange",
+        }
+    }
+    pub fn ws_url(&self) -> &'static str {
+        match self {
+            Self::Mainnet => "wss://api.hyperliquid.xyz/ws",
+            Self::Testnet => "wss://api.hyperliquid-testnet.xyz/ws",
+        }
+    }
+}
+
 async fn parse_response<T: for<'de> serde::Deserialize<'de>>(
     resp: reqwest::Response,
 ) -> Result<T, String> {
@@ -47,6 +82,7 @@ async fn parse_response<T: for<'de> serde::Deserialize<'de>>(
 
 pub struct HyperliquidClient {
     client: Client,
+    network: HyperliquidNetwork,
     user_address: Option<String>,
     private_key: Option<String>,
     external_signer: Option<Arc<dyn ExternalSigner>>,
@@ -65,30 +101,46 @@ impl Default for HyperliquidClient {
 
 impl HyperliquidClient {
     pub fn new() -> Self {
+        Self::with_network(HyperliquidNetwork::Mainnet)
+    }
+
+    /// M2 (Sho 2026-09-21): select the network (mainnet/testnet) at
+    /// construction. All REST + WS endpoints follow.
+    pub fn with_network(network: HyperliquidNetwork) -> Self {
         let ws_send_limiter = WsSendRateLimiter::new();
         HyperliquidClient {
             client: Client::new(),
+            network,
             user_address: None,
             private_key: None,
             external_signer: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
     }
 
     pub fn with_auth(user_address: impl Into<String>, private_key: String) -> Self {
+        Self::with_network_and_auth(HyperliquidNetwork::Mainnet, user_address, private_key)
+    }
+
+    pub fn with_network_and_auth(
+        network: HyperliquidNetwork,
+        user_address: impl Into<String>,
+        private_key: String,
+    ) -> Self {
         let ws_send_limiter = WsSendRateLimiter::new();
         HyperliquidClient {
             client: Client::new(),
+            network,
             user_address: Some(user_address.into()),
             private_key: Some(private_key),
             external_signer: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
@@ -106,12 +158,33 @@ impl HyperliquidClient {
         let ws_send_limiter = WsSendRateLimiter::new();
         HyperliquidClient {
             client: Client::new(),
+            network: HyperliquidNetwork::Mainnet,
             user_address: Some(user_address.into()),
             private_key: None,
             external_signer: Some(signer),
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), HyperliquidNetwork::Mainnet.ws_url()),
+            user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
+            ws_send_limiter,
+        }
+    }
+
+    pub fn with_network_and_external_signer(
+        network: HyperliquidNetwork,
+        user_address: impl Into<String>,
+        signer: Arc<dyn ExternalSigner>,
+    ) -> Self {
+        let ws_send_limiter = WsSendRateLimiter::new();
+        HyperliquidClient {
+            client: Client::new(),
+            network,
+            user_address: Some(user_address.into()),
+            private_key: None,
+            external_signer: Some(signer),
+            rest_limiter: Arc::new(RestRateLimiter::new()),
+            address_limiter: Arc::new(AddressRateLimiter::new()),
+            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
@@ -141,7 +214,7 @@ impl HyperliquidClient {
             )
         })?;
         self.client
-            .post(HYPERLIQUID_INFO_URL)
+            .post(self.network.info_url())
             .json(&body)
             .send()
             .await
@@ -219,7 +292,7 @@ impl HyperliquidClient {
 
         let resp = self
             .client
-            .post(HYPERLIQUID_EXCHANGE_URL)
+            .post(self.network.exchange_url())
             .json(&payload)
             .send()
             .await
@@ -1184,7 +1257,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         let resp = self
             .client
-            .post(HYPERLIQUID_EXCHANGE_URL)
+            .post(self.network.exchange_url())
             .header("Content-Type", "application/json")
             .body(payload_str)
             .send()
@@ -1469,6 +1542,7 @@ where
         &client.user_ws_managers,
         client.ws_send_limiter.clone(),
         user_addr,
+        client.network.ws_url(),
     );
     Box::pin(async_stream::stream! {
         let stream = managed_stream(manager, subscription, parse);
@@ -1483,6 +1557,7 @@ fn get_or_create_user_manager(
     user_ws_managers: &RwLock<HashMap<String, HyperliquidWsManager>>,
     ws_send_limiter: WsSendRateLimiter,
     user_addr: String,
+    ws_url: &'static str,
 ) -> HyperliquidWsManager {
     {
         let managers = user_ws_managers.read().unwrap_or_else(|e| e.into_inner());
@@ -1494,7 +1569,7 @@ fn get_or_create_user_manager(
     let mut managers = user_ws_managers.write().unwrap_or_else(|e| e.into_inner());
     managers
         .entry(user_addr.clone())
-        .or_insert_with(|| HyperliquidWsManager::new(Some(user_addr), ws_send_limiter))
+        .or_insert_with(|| HyperliquidWsManager::new(Some(user_addr), ws_send_limiter, ws_url))
         .clone()
 }
 
