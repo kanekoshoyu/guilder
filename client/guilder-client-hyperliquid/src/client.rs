@@ -53,6 +53,15 @@ impl HyperliquidNetwork {
             Self::Testnet => "wss://api.hyperliquid-testnet.xyz/ws",
         }
     }
+    /// EIP-712 phantom-agent `source` for L1 action signing.
+    /// Hyperliquid mainnet uses "a", testnet uses "b" — matches the official
+    /// Python SDK (`construct_phantom_agent`).
+    pub fn eip712_source(&self) -> &'static str {
+        match self {
+            Self::Mainnet => "a",
+            Self::Testnet => "b",
+        }
+    }
 }
 
 async fn parse_response<T: for<'de> serde::Deserialize<'de>>(
@@ -265,6 +274,7 @@ impl HyperliquidClient {
             &action,
             vault_address,
             nonce,
+            self.network.eip712_source(),
         )
         .await?;
 
@@ -697,6 +707,7 @@ fn compute_eip712_digest(
     msgpack: &[u8],
     nonce: u64,
     vault_address: Option<&str>,
+    source: &str,
 ) -> Result<[u8; 32], String> {
     let mut data = msgpack.to_vec();
     data.extend_from_slice(&nonce.to_be_bytes());
@@ -712,7 +723,7 @@ fn compute_eip712_digest(
 
     let connection_id = keccak256(&data);
     let agent_type_hash = keccak256(b"Agent(string source,bytes32 connectionId)");
-    let source_hash = keccak256(b"a");
+    let source_hash = keccak256(source.as_bytes());
     let mut struct_data = [0u8; 96];
     struct_data[..32].copy_from_slice(&agent_type_hash);
     struct_data[32..64].copy_from_slice(&source_hash);
@@ -766,8 +777,9 @@ async fn sign_with_msgpack(
     external_signer: Option<&Arc<dyn ExternalSigner>>,
     nonce: u64,
     vault_address: Option<&str>,
+    source: &str,
 ) -> Result<(String, String, u8), String> {
-    let digest = compute_eip712_digest(msgpack, nonce, vault_address)?;
+    let digest = compute_eip712_digest(msgpack, nonce, vault_address, source)?;
 
     if let Some(signer) = external_signer {
         let sig = signer.sign_prehash(&digest).await?;
@@ -789,9 +801,10 @@ async fn sign_action(
     action: &Value,
     vault_address: Option<&str>,
     nonce: u64,
+    source: &str,
 ) -> Result<(String, String, u8), String> {
     let msgpack_bytes = action_to_canonical_msgpack(action)?;
-    let digest = compute_eip712_digest(&msgpack_bytes, nonce, vault_address)?;
+    let digest = compute_eip712_digest(&msgpack_bytes, nonce, vault_address, source)?;
 
     if let Some(signer) = external_signer {
         let sig = signer.sign_prehash(&digest).await?;
@@ -1234,6 +1247,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             self.external_signer.as_ref(),
             nonce,
             None,
+            self.network.eip712_source(),
         )
         .await?;
 
@@ -1969,6 +1983,43 @@ impl guilder_abstraction::SubscribeMarketDataOps for HyperliquidClient {
 mod msgpack_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_eip712_digest_known_answers() {
+        // Reference digests generated with the official hyperliquid-python-sdk
+        // (msgpack.packb → action_hash → EIP-712 Agent payload → eth_account
+        // sign + ECDSA address-recovery verified). Regen script logic:
+        // nonce + action mirrored exactly below.
+        // 0.6.4 regression guard: source was hardcoded to "a" (mainnet), which
+        // makes every TESTNET signature verify against the wrong phantom agent
+        // ("User or API Wallet 0x... does not exist").
+        let action = json!({
+            "type": "order",
+            "orders": [{
+                "a": 1, "b": true, "p": "1500.5", "s": "0.05",
+                "r": false, "t": {"limit": {"tif": "Gtc"}}
+            }],
+            "grouping": "na"
+        });
+        let nonce: u64 = 1758572400123;
+        let msgpack = action_to_canonical_msgpack(&action).unwrap();
+
+        let mainnet = compute_eip712_digest(&msgpack, nonce, None, "a").unwrap();
+        assert_eq!(
+            hex::encode(mainnet),
+            "28cd97dd515629633af463bd7edaab14e61b3941b638d410c317cac7e0aed860"
+        );
+
+        let testnet = compute_eip712_digest(&msgpack, nonce, None, "b").unwrap();
+        assert_eq!(
+            hex::encode(testnet),
+            "d452e53f806773ca6d7ab5d10147518bff0d8b64a4404dcb062e3d2fb3d85c0b"
+        );
+
+        assert_ne!(mainnet, testnet);
+        assert_eq!(HyperliquidNetwork::Mainnet.eip712_source(), "a");
+        assert_eq!(HyperliquidNetwork::Testnet.eip712_source(), "b");
+    }
 
     #[test]
     fn test_msgpack_null() {

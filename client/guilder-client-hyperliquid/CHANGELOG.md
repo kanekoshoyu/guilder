@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.5 — 2026-09-22
+
+### Fixed
+- **Testnet L1 signing used the mainnet EIP-712 source**: `compute_eip712_digest`
+  hardcoded the phantom-agent `source` to `"a"` (mainnet). Hyperliquid testnet
+  requires `"b"` (see official Python SDK `construct_phantom_agent`), so every
+  testnet-signed action failed verification (`User or API Wallet 0x... does not
+  exist`). `source` now follows `HyperliquidNetwork` via the new
+  `HyperliquidNetwork::eip712_source()`; mainnet behavior is unchanged.
+- Added known-answer regression tests: reference digests generated with the
+  official hyperliquid-python-sdk (msgpack → action_hash → EIP-712 Agent →
+  eth_account sign + ECDSA address recovery). The mainnet case also pins
+  byte-exact msgpack compatibility with the SDK.
+
 ## 0.6.1 — 2026-05-18
 
 ### Changed
