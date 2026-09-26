@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 — 2026-09-27
+
+### Added
+
+- **PERP ledger row in `get_balance`** (manual-account model, Sho 2026-09-27):
+  the futures margin account (`clearinghouseState`) is appended LAST to the
+  balance rows with token `__PERP__` (`guilder_client_hyperliquid::
+  PERP_LEDGER_TOKEN`) — equity = accountValue, free/usable = accountValue −
+  totalMarginUsed, margin_used/maintenance filled. `get_balance` now reports
+  BOTH ledgers: spot rows (USDC spot cash = not margin) + one `__PERP__` row
+  (the futures trading balance). Consumers split by token, not position;
+  marker never collides with a real asset symbol. `map_perp_state` (added
+  0.6.6) is now wired into the live path. Locked by
+  `balance_rows_end_with_marked_perp_row`.
+
 ## 0.6.5 — 2026-09-22
 
 ### Fixed
