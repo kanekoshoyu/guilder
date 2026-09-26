@@ -529,7 +529,7 @@ pub(crate) fn map_perp_state(
         .unwrap_or(Decimal::ZERO);
     let free = equity - margin_used;
     Ok(guilder_abstraction::AccountBalance {
-        token: "USDC".to_string(),
+        token: crate::PERP_LEDGER_TOKEN.to_string(),
         equity,
         free,
         safe: None,
@@ -1826,10 +1826,8 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
 
         let state: SpotStateResponse = parse_response(resp).await?;
 
-        // Fetch perp-side margin summary for margin_used.
-        // clearinghouseState → weight 2. Failure is non-fatal — margin_used
-        // stays None for all entries.
-        let perp_margin_used: Option<Decimal> = match self
+        // Fetch the PERP ledger (clearinghouseState). weight 2.
+        let perp_parsed: Option<ClearinghouseStateResponse> = match self
             .info_post(
                 serde_json::json!({"type": "clearinghouseState", "user": user}),
                 2,
@@ -1837,19 +1835,46 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             )
             .await
         {
-            Ok(resp) => parse_response::<ClearinghouseStateResponse>(resp)
-                .await
-                .ok()
-                .and_then(|ch| {
-                    ch.margin_summary
-                        .total_margin_used
-                        .as_deref()
-                        .and_then(parse_decimal)
-                }),
+            Ok(resp) => parse_response::<ClearinghouseStateResponse>(resp).await.ok(),
             Err(_) => None,
         };
 
-        map_spot_state(state, perp_margin_used)
+        // Perp-side margin_used lands on the SPOT USDC row for backwards
+        // compatibility (0.6.x consumers).
+        let perp_margin_used: Option<Decimal> = perp_parsed.as_ref().and_then(|ch| {
+            ch.margin_summary
+                .total_margin_used
+                .as_deref()
+                .and_then(parse_decimal)
+        });
+
+        // Spot ledger rows — keep per-asset spot balances (incl. USDC spot
+        // cash, which is NOT margin under the manual-account model).
+        let mut rows = map_spot_state(state, perp_margin_used)?;
+
+        // Perp ledger row appended LAST (stable position for consumers that
+        // index rows): token = PERP_LEDGER_TOKEN. equity = accountValue,
+        // free/usable = accountValue − totalMarginUsed, margin fields filled.
+        // Failure here is fatal — a trader that cannot read its futures
+        // ledger must not fall back to spot sizing.
+        let perp_state: ClearinghouseStateResponse = match perp_parsed {
+            Some(ch) => ch,
+            None => {
+                // The margin probe failed — retry once so a transient
+                // clearinghouse error cannot silently drop the futures row.
+                let resp = self
+                    .info_post(
+                        serde_json::json!({"type": "clearinghouseState", "user": user}),
+                        2,
+                        "get_balance_perp_row",
+                    )
+                    .await?;
+                parse_response::<ClearinghouseStateResponse>(resp).await?
+            }
+        };
+        rows.push(map_perp_state(perp_state)?);
+
+        Ok(rows)
     }
 
     /// Returns the user's address-level API rate limit budget.
@@ -2514,6 +2539,38 @@ mod spot_state_tests {
         );
     }
 
+    /// 0.7.0 contract: `map_balance_rows` (spot + perp) appends the futures
+    /// ledger row LAST with the marker token. Locked by the trader's
+    /// ledger-split consumer (account manager).
+    #[test]
+    fn balance_rows_end_with_marked_perp_row() {
+        let state: SpotStateResponse =
+            serde_json::from_str(TESTNET_SHAPE).expect("testnet shape must deserialize");
+        let perp: ClearinghouseStateResponse = serde_json::from_str(
+            r#"{"marginSummary":{"accountValue":"30.0","totalMarginUsed":"5.0"},"assetPositions":[]}"#,
+        )
+        .expect("perp shape must deserialize");
+        let mut rows =
+            map_spot_state(state, Some(Decimal::from(2))).expect("spot rows must map");
+        rows.push(map_perp_state(perp).expect("perp row must map"));
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].token, "USDC");
+        assert_eq!(rows[0].margin_used.map(|d| d.to_string()), Some("2".to_string()));
+        assert_eq!(rows[1].token, crate::PERP_LEDGER_TOKEN);
+        assert_eq!(rows[1].equity.to_string(), "30.0");
+        assert_eq!(rows[1].free.to_string(), "25.0");
+        assert_eq!(rows[1].usable.to_string(), "25.0");
+        assert_eq!(
+            rows[1].margin_used.map(|d| d.to_string()),
+            Some("5.0".to_string())
+        );
+        // Marker token must never collide with a real asset symbol.
+        assert!(rows[..rows.len() - 1]
+            .iter()
+            .all(|b| b.token != crate::PERP_LEDGER_TOKEN));
+    }
+
     /// PERP margin account (clearinghouseState) — the trading money under
     /// Hyperliquid's manual-account model (spot and futures are SEPARATE
     /// ledgers; SMR trades perps, so sizing reads THIS account).
@@ -2524,7 +2581,9 @@ mod spot_state_tests {
         )
         .expect("perp shape must deserialize");
         let usdc = map_perp_state(state).expect("perp mapping must succeed");
-        assert_eq!(usdc.token, "USDC");
+        // 0.7.0: the perp ledger row is marked, not "USDC" — spot and futures
+        // are separate ledgers and consumers split rows by token.
+        assert_eq!(usdc.token, crate::PERP_LEDGER_TOKEN);
         assert_eq!(usdc.equity.to_string(), "30.0"); // accountValue
         assert_eq!(usdc.free.to_string(), "30.0"); // accountValue - marginUsed
         assert_eq!(usdc.usable.to_string(), "30.0");
