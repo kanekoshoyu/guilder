@@ -125,7 +125,11 @@ impl HyperliquidClient {
             external_signer: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
+            market_ws_manager: HyperliquidWsManager::new(
+                None,
+                ws_send_limiter.clone(),
+                network.ws_url(),
+            ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
@@ -149,7 +153,11 @@ impl HyperliquidClient {
             external_signer: None,
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
+            market_ws_manager: HyperliquidWsManager::new(
+                None,
+                ws_send_limiter.clone(),
+                network.ws_url(),
+            ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
@@ -173,7 +181,11 @@ impl HyperliquidClient {
             external_signer: Some(signer),
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), HyperliquidNetwork::Mainnet.ws_url()),
+            market_ws_manager: HyperliquidWsManager::new(
+                None,
+                ws_send_limiter.clone(),
+                HyperliquidNetwork::Mainnet.ws_url(),
+            ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
@@ -193,7 +205,11 @@ impl HyperliquidClient {
             external_signer: Some(signer),
             rest_limiter: Arc::new(RestRateLimiter::new()),
             address_limiter: Arc::new(AddressRateLimiter::new()),
-            market_ws_manager: HyperliquidWsManager::new(None, ws_send_limiter.clone(), network.ws_url()),
+            market_ws_manager: HyperliquidWsManager::new(
+                None,
+                ws_send_limiter.clone(),
+                network.ws_url(),
+            ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
         }
@@ -239,10 +255,10 @@ impl HyperliquidClient {
         if self.external_signer.is_some() {
             return Ok(None);
         }
-        self.private_key
-            .as_deref()
-            .map(Some)
-            .ok_or_else(|| "private key or external signer required: use with_auth or with_external_signer".to_string())
+        self.private_key.as_deref().map(Some).ok_or_else(|| {
+            "private key or external signer required: use with_auth or with_external_signer"
+                .to_string()
+        })
     }
 
     async fn get_asset_index(&self, symbol: &str) -> Result<usize, String> {
@@ -417,6 +433,112 @@ struct PredictedFundingEntry {
 }
 
 // --- Helpers ---
+
+/// spotClearinghouseState response. The maintenance map is ABSENT on
+/// testnet (field only exists on mainnet) — default = empty map = zero
+/// maintenance impact on every token (caught live 2026-09-26: every
+/// testnet get_balance failed `missing field` and equity read as 0).
+#[derive(Deserialize)]
+pub(crate) struct SpotStateResponse {
+    pub balances: Vec<SpotBalance>,
+    #[serde(default, rename = "tokenToAvailableAfterMaintenance")]
+    pub token_to_available_after_maintenance: Vec<(i32, String)>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SpotBalance {
+    pub coin: String,
+    pub total: String,
+    pub hold: String,
+    #[serde(default)]
+    pub token: Option<i32>,
+    #[serde(default)]
+    #[serde(rename = "entryNtl")]
+    pub entry_ntl: Option<String>,
+}
+
+/// Map a parsed SPOT state (spotClearinghouseState) into account balances.
+/// Pure — unit-tested against both the mainnet shape (maintenance map
+/// present) and the testnet shape (absent).
+pub(crate) fn map_spot_state(
+    state: SpotStateResponse,
+    perp_margin_used: Option<Decimal>,
+) -> Result<Vec<guilder_abstraction::AccountBalance>, String> {
+    // Build a safe lookup map from token ID → available after maintenance.
+    // Not every token appears in the map — absence means zero maintenance impact.
+    let safe_map: HashMap<i32, Decimal> = state
+        .token_to_available_after_maintenance
+        .into_iter()
+        .filter_map(|(token_id, value)| parse_decimal(&value).map(|v| (token_id, v)))
+        .collect();
+
+    state
+        .balances
+        .into_iter()
+        .map(|balance| {
+            let equity =
+                parse_decimal(&balance.total).ok_or_else(|| "invalid total balance".to_string())?;
+            let hold =
+                parse_decimal(&balance.hold).ok_or_else(|| "invalid hold balance".to_string())?;
+            let free = equity - hold;
+
+            let safe = balance
+                .token
+                .and_then(|token_id| safe_map.get(&token_id).copied());
+            let usable = match safe {
+                Some(s) => std::cmp::min(free, s),
+                None => free,
+            };
+            let maintenance = safe.map(|s| equity - s);
+
+            // margin_used is account-level (perp side); only populate on USDC.
+            let margin_used = if balance.coin == "USDC" {
+                perp_margin_used
+            } else {
+                None
+            };
+
+            Ok(guilder_abstraction::AccountBalance {
+                token: balance.coin,
+                equity,
+                free,
+                safe,
+                usable,
+                hold,
+                margin_used,
+                maintenance,
+            })
+        })
+        .collect()
+}
+
+/// Map the PERP margin account (clearinghouseState) into the trading USDC
+/// balance row. Under Hyperliquid's manual-account model spot and futures
+/// are SEPARATE ledgers — futures trading sizes from THIS account:
+/// equity = accountValue, free/usable = accountValue - totalMarginUsed.
+pub(crate) fn map_perp_state(
+    state: ClearinghouseStateResponse,
+) -> Result<guilder_abstraction::AccountBalance, String> {
+    let equity = parse_decimal(&state.margin_summary.account_value)
+        .ok_or_else(|| "invalid accountValue".to_string())?;
+    let margin_used = state
+        .margin_summary
+        .total_margin_used
+        .as_deref()
+        .and_then(parse_decimal)
+        .unwrap_or(Decimal::ZERO);
+    let free = equity - margin_used;
+    Ok(guilder_abstraction::AccountBalance {
+        token: "USDC".to_string(),
+        equity,
+        free,
+        safe: None,
+        usable: free,
+        hold: Decimal::ZERO,
+        margin_used: Some(margin_used),
+        maintenance: Some(equity - margin_used),
+    })
+}
 
 fn parse_decimal(s: &str) -> Option<Decimal> {
     Decimal::from_str(s).ok()
@@ -1498,12 +1620,13 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
             self.market_ws_manager.clone(),
             subscription,
             |msg: HyperliquidWsInboundMessage| {
-            if let Some(ctx) = msg.as_asset_context() {
-                vec![Ok(ctx)]
-            } else {
-                vec![]
-            }
-        }))
+                if let Some(ctx) = msg.as_asset_context() {
+                    vec![Ok(ctx)]
+                } else {
+                    vec![]
+                }
+            },
+        ))
     }
 
     fn subscribe_liquidation(&self, user: String) -> BoxStream<Result<Liquidation, String>> {
@@ -1527,12 +1650,13 @@ impl guilder_abstraction::SubscribeMarketData for HyperliquidClient {
             self.market_ws_manager.clone(),
             subscription,
             |msg: HyperliquidWsInboundMessage| {
-            if let Some(fills) = msg.as_trades() {
-                fills.into_iter().map(Ok).collect()
-            } else {
-                vec![]
-            }
-        }))
+                if let Some(fills) = msg.as_trades() {
+                    fills.into_iter().map(Ok).collect()
+                } else {
+                    vec![]
+                }
+            },
+        ))
     }
 
     /// Gracefully shut down all market data subscriptions.
@@ -1687,13 +1811,6 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             )
             .await?;
 
-        #[derive(Deserialize)]
-        struct SpotStateResponse {
-            balances: Vec<SpotBalance>,
-            #[serde(rename = "tokenToAvailableAfterMaintenance")]
-            token_to_available_after_maintenance: Vec<(i32, String)>,
-        }
-
         #[allow(dead_code)]
         #[derive(Deserialize)]
         struct SpotBalance {
@@ -1708,16 +1825,6 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
         }
 
         let state: SpotStateResponse = parse_response(resp).await?;
-
-        // Build a safe lookup map from token ID → available after maintenance.
-        // Not every token appears in the map — absence means zero maintenance impact.
-        let safe_map: HashMap<i32, Decimal> = state
-            .token_to_available_after_maintenance
-            .into_iter()
-            .filter_map(|(token_id, value)| {
-                parse_decimal(&value).map(|v| (token_id, v))
-            })
-            .collect();
 
         // Fetch perp-side margin summary for margin_used.
         // clearinghouseState → weight 2. Failure is non-fatal — margin_used
@@ -1742,42 +1849,7 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
             Err(_) => None,
         };
 
-        state
-            .balances
-            .into_iter()
-            .map(|balance| {
-                let equity = parse_decimal(&balance.total)
-                    .ok_or_else(|| "invalid total balance".to_string())?;
-                let hold = parse_decimal(&balance.hold)
-                    .ok_or_else(|| "invalid hold balance".to_string())?;
-                let free = equity - hold;
-
-                let safe = balance.token.and_then(|token_id| safe_map.get(&token_id).copied());
-                let usable = match safe {
-                    Some(s) => std::cmp::min(free, s),
-                    None => free,
-                };
-                let maintenance = safe.map(|s| equity - s);
-
-                // margin_used is account-level (perp side); only populate on USDC.
-                let margin_used = if balance.coin == "USDC" {
-                    perp_margin_used
-                } else {
-                    None
-                };
-
-                Ok(guilder_abstraction::AccountBalance {
-                    token: balance.coin,
-                    equity,
-                    free,
-                    safe,
-                    usable,
-                    hold,
-                    margin_used,
-                    maintenance,
-                })
-            })
-            .collect()
+        map_spot_state(state, perp_margin_used)
     }
 
     /// Returns the user's address-level API rate limit budget.
@@ -1965,7 +2037,10 @@ impl guilder_abstraction::SubscribeUserEvents for HyperliquidClient {
             self.market_ws_manager.unsubscribe_user(addr);
         }
         // Also unsubscribe from all per-user managers.
-        let managers = self.user_ws_managers.read().unwrap_or_else(|e| e.into_inner());
+        let managers = self
+            .user_ws_managers
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
         for (addr, manager) in managers.iter() {
             manager.unsubscribe_user(addr);
         }
@@ -2326,7 +2401,6 @@ mod msgpack_tests {
     }
 }
 
-
 #[async_trait::async_trait]
 impl guilder_abstraction::ListingEventSource for HyperliquidClient {
     /// Authoritative lifecycle events from the venue. Hyperliquid's info API
@@ -2336,12 +2410,14 @@ impl guilder_abstraction::ListingEventSource for HyperliquidClient {
     /// a `delist` event per isDelisted symbol. The QDB sync layer upserts
     /// these into token_registry_events; true FIRST-LISTING times for
     /// pre-history coins come from earlier sync runs, not from this call.
-    async fn get_listing_events(
-        &self,
-    ) -> Result<Vec<guilder_abstraction::ListingEvent>, String> {
+    async fn get_listing_events(&self) -> Result<Vec<guilder_abstraction::ListingEvent>, String> {
         // meta → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "meta"}), 20, "get_listing_events")
+            .info_post(
+                serde_json::json!({"type": "meta"}),
+                20,
+                "get_listing_events",
+            )
             .await?;
         let meta = parse_response::<MetaResponse>(resp).await?;
         Ok(meta
@@ -2356,12 +2432,14 @@ impl guilder_abstraction::ListingEventSource for HyperliquidClient {
             .collect())
     }
 
-    async fn get_current_universe(
-        &self,
-    ) -> Result<Vec<guilder_abstraction::SymbolStatus>, String> {
+    async fn get_current_universe(&self) -> Result<Vec<guilder_abstraction::SymbolStatus>, String> {
         // meta → weight 20
         let resp = self
-            .info_post(serde_json::json!({"type": "meta"}), 20, "get_current_universe")
+            .info_post(
+                serde_json::json!({"type": "meta"}),
+                20,
+                "get_current_universe",
+            )
             .await?;
         let meta = parse_response::<MetaResponse>(resp).await?;
         Ok(meta
@@ -2373,5 +2451,86 @@ impl guilder_abstraction::ListingEventSource for HyperliquidClient {
                 is_delisted: a.is_delisted,
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod spot_state_tests {
+    use super::*;
+
+    /// EXACT response shape Hyperliquid TESTNET returns for
+    /// spotClearinghouseState — NO tokenToAvailableAfterMaintenance.
+    /// (Captured live from trader.daometric.com's deserialize warning,
+    /// 2026-09-26.) Must parse: USDC total 969, free 969, usable 969.
+    const TESTNET_SHAPE: &str =
+        r#"{"balances":[{"coin":"USDC","token":0,"total":"969.0","hold":"0.0","entryNtl":"0.0"}]}"#;
+
+    /// MAINNET shape — maintenance map present.
+    const MAINNET_SHAPE: &str = r#"{"balances":[{"coin":"USDC","token":0,"total":"969.0","hold":"10.0","entryNtl":"0.0"}],"tokenToAvailableAfterMaintenance":[[0,"955.0"]]}"#;
+
+    #[test]
+    fn testnet_spot_state_without_maintenance_map_parses() {
+        let state: SpotStateResponse =
+            serde_json::from_str(TESTNET_SHAPE).expect("testnet shape must deserialize");
+        let balances = map_spot_state(state, None).expect("mapping must succeed");
+        assert_eq!(balances.len(), 1);
+        let usdc = &balances[0];
+        assert_eq!(usdc.token, "USDC");
+        assert_eq!(usdc.equity.to_string(), "969.0");
+        assert_eq!(usdc.hold.to_string(), "0.0");
+        assert_eq!(usdc.free.to_string(), "969.0");
+        // No maintenance map → usable falls back to free.
+        assert_eq!(usdc.usable.to_string(), "969.0");
+        assert_eq!(usdc.safe, None);
+        assert_eq!(usdc.maintenance, None);
+    }
+
+    #[test]
+    fn mainnet_spot_state_with_maintenance_map_parses() {
+        let state: SpotStateResponse =
+            serde_json::from_str(MAINNET_SHAPE).expect("mainnet shape must deserialize");
+        let balances = map_spot_state(state, None).expect("mapping must succeed");
+        let usdc = &balances[0];
+        assert_eq!(usdc.equity.to_string(), "969.0");
+        assert_eq!(usdc.free.to_string(), "959.0");
+        // maintenance map present → usable = min(free, safe) = 955.
+        assert_eq!(usdc.usable.to_string(), "955.0");
+        assert_eq!(usdc.safe.map(|d| d.to_string()), Some("955.0".to_string()));
+        assert_eq!(
+            usdc.maintenance.map(|d| d.to_string()),
+            Some("14.0".to_string())
+        );
+    }
+
+    #[test]
+    fn usdc_balance_carries_perp_margin_used() {
+        let state: SpotStateResponse =
+            serde_json::from_str(TESTNET_SHAPE).expect("testnet shape must deserialize");
+        let balances = map_spot_state(state, Some(Decimal::from(2))).expect("mapping must succeed");
+        let usdc = &balances[0];
+        assert_eq!(
+            usdc.margin_used.map(|d| d.to_string()),
+            Some("2".to_string())
+        );
+    }
+
+    /// PERP margin account (clearinghouseState) — the trading money under
+    /// Hyperliquid's manual-account model (spot and futures are SEPARATE
+    /// ledgers; SMR trades perps, so sizing reads THIS account).
+    #[test]
+    fn perp_margin_account_maps_to_usdc_row() {
+        let state: ClearinghouseStateResponse = serde_json::from_str(
+            r#"{"marginSummary":{"accountValue":"30.0","totalNtlPos":"0.0","totalRawUsd":"30.0","totalMarginUsed":"0.0"},"assetPositions":[]}"#,
+        )
+        .expect("perp shape must deserialize");
+        let usdc = map_perp_state(state).expect("perp mapping must succeed");
+        assert_eq!(usdc.token, "USDC");
+        assert_eq!(usdc.equity.to_string(), "30.0"); // accountValue
+        assert_eq!(usdc.free.to_string(), "30.0"); // accountValue - marginUsed
+        assert_eq!(usdc.usable.to_string(), "30.0");
+        assert_eq!(
+            usdc.margin_used.map(|d| d.to_string()),
+            Some("0.0".to_string())
+        );
     }
 }
