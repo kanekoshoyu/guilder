@@ -3,6 +3,7 @@ pub mod rate_limiter;
 pub(crate) mod ws;
 pub use client::*;
 pub use client::HyperliquidNetwork;
+pub use ws::manager::{is_reconnect_marker, WS_RECONNECTING_MARKER};
 
 /// Token string marking the PERP (futures) ledger row in `get_balance`
 /// output. Under the manual-account model spot and futures are SEPARATE
