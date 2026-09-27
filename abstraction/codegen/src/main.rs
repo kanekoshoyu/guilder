@@ -360,6 +360,7 @@ fn codegen_str_rust(config: YamlConfig) -> String {
                 .any(|m| uses_map(&m.return_type) || m.args.iter().any(|a| uses_map(&a.arg_type)))
         });
     if has_map {
+        code.push_str("use async_trait::async_trait;\n");
         code.push_str("use std::collections::HashMap;\n");
     }
     let has_stream = config.traits.iter().any(|tr| {
@@ -430,6 +431,11 @@ fn codegen_str_rust(config: YamlConfig) -> String {
             code.push_str(&format!("/// {}\n", description));
         }
         if tr.r#async {
+            // async-trait keeps `dyn`-compatibility for client impls that use
+            // #[async_trait] themselves (HL client does). The bare
+            // #[allow(async_fn_in_trait)] variant breaks their impl blocks
+            // (E0195 lifetime mismatches) — restored per 8690389.
+            code.push_str("#[async_trait]\n");
             code.push_str("#[allow(async_fn_in_trait)]\n");
         }
         code.push_str("#[allow(clippy::too_many_arguments)]\n");
@@ -466,6 +472,32 @@ fn codegen_str_rust(config: YamlConfig) -> String {
 
         code.push_str("}\n\n");
     }
+
+    // HAND-KEPT: EcdsaSignature + ExternalSigner are not yaml-modelable
+    // (methods on a trait struct) — regenerated output must carry them or
+    // the HL client's ExternalSigner impl breaks (restored per 8690389).
+    code.push_str(
+        "/// ECDSA recoverable signature (secp256k1), returned by external signers.\n\n\
+/// Contains the 64-byte compact signature (r || s) and a recovery ID (0 or 1)\n\
+/// used to derive the signer's public key from the signature.\n\
+#[derive(Debug, Clone)]\n\
+pub struct EcdsaSignature {\n\
+    /// r component, big-endian 32 bytes\n\
+    pub r: [u8; 32],\n\
+    /// s component, big-endian 32 bytes\n\
+    pub s: [u8; 32],\n\
+    /// recovery id (0 or 1)\n\
+    pub v: u8,\n\
+}\n\n\
+/// External signer trait for hardware-backed or custom signing backends.\n\
+#[async_trait]\n\
+pub trait ExternalSigner: Send + Sync {\n\
+    /// Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains).\n\
+    async fn sign_prehash(&self, digest: &[u8; 32]) -> Result<EcdsaSignature, String>;\n\n\
+    /// Get the signer's wallet/chain address (used for authentication).\n\
+    fn signer_address(&self) -> String;\n\
+}\n\n",
+    );
 
     code
 }
