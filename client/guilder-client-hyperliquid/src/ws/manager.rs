@@ -537,8 +537,19 @@ fn dispatch_message(
                 }
             }
         }
-        HyperliquidWsInboundMessage::Unknown { channel, .. } => {
-            warn!(channel = %channel, "WS message ignored as unknown");
+        HyperliquidWsInboundMessage::Unknown { channel, data } => {
+            // Include a truncated payload so venue error frames (channel
+            // "error") carry their rejection reason — without it the warn is
+            // undiagnosable (albatross 09-27: {"channel":"error"} with no body).
+            let payload = data.to_string();
+            let payload = if payload.len() > 300 {
+                let mut cut = String::from(&payload[..300]);
+                cut.push_str("…");
+                cut
+            } else {
+                payload
+            };
+            warn!(channel = %channel, payload = %payload, "WS message ignored as unknown");
         }
         _ => {
             let mut matched = 0usize;
