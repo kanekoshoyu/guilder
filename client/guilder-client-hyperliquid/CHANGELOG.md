@@ -133,6 +133,17 @@
   position's entry notional). Positions without a real entry are now
   skipped — the next read returns them properly. 0.7.3.
 
+### Fixed
+
+- **`settled_usd` semantics CORRECTED** (albatross #114 — the anchor bug's
+  true root): 0.7.2 set `settled_usd = marginSummary.totalRawUsd`, but that
+  HL field is the LIQUIDATION basis (`accountValue − positionNotional`), not
+  cash — anchoring equity on it produced a −119 offset tracking the notional
+  (live: `EquityMismatch local ≈ −116`). `settled_usd` is now
+  `accountValue − Σ assetPositions.unrealizedPnl` — the accounting cash,
+  venue-authoritative (venue's own uPnL, immune to entryPx:null transients).
+  Perp row only; `PositionDetail` gained `unrealized_pnl`.
+
 ## 0.7.2 — 2026-09-27
 
 ### Added

@@ -407,6 +407,9 @@ struct PositionDetail {
     /// positive = long, negative = short
     szi: String,
     entry_px: Option<String>,
+    /// Venue-authoritative unrealized PnL (HL reports it per position).
+    #[serde(default)]
+    unrealized_pnl: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -529,11 +532,16 @@ pub(crate) fn map_perp_state(
         .and_then(parse_decimal)
         .unwrap_or(Decimal::ZERO);
     let free = equity - margin_used;
-    let settled_usd = state
-        .margin_summary
-        .total_raw_usd
-        .as_deref()
-        .and_then(parse_decimal);
+    // settled cash = accountValue − Σ uPnL(assetPositions) — the accounting
+    // basis. NOT marginSummary.totalRawUsd: that field is the LIQUIDATION
+    // basis (accountValue − notional), not cash (albatross #114 live:
+    // anchoring on it produced a −119 equity, delta tracking the notional).
+    let venue_uPnL: Decimal = state
+        .asset_positions
+        .iter()
+        .filter_map(|ap| ap.position.unrealized_pnl.as_deref().and_then(parse_decimal))
+        .sum();
+    let settled_usd = Some(equity - venue_uPnL);
     Ok(guilder_abstraction::AccountBalance {
         token: crate::PERP_LEDGER_TOKEN.to_string(),
         equity,
@@ -2560,7 +2568,7 @@ mod spot_state_tests {
         let state: SpotStateResponse =
             serde_json::from_str(TESTNET_SHAPE).expect("testnet shape must deserialize");
         let perp: ClearinghouseStateResponse = serde_json::from_str(
-            r#"{"marginSummary":{"accountValue":"30.0","totalMarginUsed":"5.0"},"assetPositions":[]}"#,
+            r#"{"marginSummary":{"accountValue":"30.0","totalMarginUsed":"5.0"},"assetPositions":[{"position":{"coin":"BTC","szi":"0.1","entryPx":"100","unrealizedPnl":"2.0"}}]}"#,
         )
         .expect("perp shape must deserialize");
         let mut rows =
@@ -2578,8 +2586,9 @@ mod spot_state_tests {
             rows[1].margin_used.map(|d| d.to_string()),
             Some("5.0".to_string())
         );
-        // 0.7.2: settled cash surface — fixture has no totalRawUsd → None
-        assert_eq!(rows[1].settled_usd, None);
+        // 0.7.4: settled cash = accountValue − Σ venue uPnL = 30 − 2 = 28
+        // (NOT totalRawUsd — that's the liquidation basis, ≠ cash)
+        assert_eq!(rows[1].settled_usd.map(|d| d.to_string()), Some("28.0".into()));
         // Marker token must never collide with a real asset symbol.
         assert!(rows[..rows.len() - 1]
             .iter()
@@ -2592,7 +2601,7 @@ mod spot_state_tests {
     #[test]
     fn perp_margin_account_maps_to_usdc_row() {
         let state: ClearinghouseStateResponse = serde_json::from_str(
-            r#"{"marginSummary":{"accountValue":"30.0","totalNtlPos":"0.0","totalRawUsd":"30.0","totalMarginUsed":"0.0"},"assetPositions":[]}"#,
+            r#"{"marginSummary":{"accountValue":"30.0","totalNtlPos":"0.0","totalRawUsd":"-70.0","totalMarginUsed":"0.0"},"assetPositions":[]}"#,
         )
         .expect("perp shape must deserialize");
         let usdc = map_perp_state(state).expect("perp mapping must succeed");
@@ -2600,6 +2609,7 @@ mod spot_state_tests {
         // are separate ledgers and consumers split rows by token.
         assert_eq!(usdc.token, crate::PERP_LEDGER_TOKEN);
         // 0.7.2: settled_usd carries totalRawUsd (venue settled cash) when present.
+        // settled = accountValue − ΣuPnL = 30 − 0 = 30 (totalRawUsd −70 ignored)
         assert_eq!(usdc.settled_usd.map(|d| d.to_string()), Some("30.0".into()));
         assert_eq!(usdc.equity.to_string(), "30.0"); // accountValue
         assert_eq!(usdc.free.to_string(), "30.0"); // accountValue - marginUsed
