@@ -109,3 +109,15 @@
   - Env-var gated: skips when `HYPERLIQUID_WALLET_ADDRESS` and `HYPERLIQUID_WALLET_KEY` are not set
   - Tests full lifecycle: place limit order → verify in open orders → cancel → verify removed
 - Cloid conversion: user-provided cloid strings are hashed via keccak256 and truncated to 16 bytes (0x + 32 hex chars) to meet Hyperliquid's 128-bit cloid format requirement
+
+## 0.7.1 — 2026-09-27
+
+### Changed
+
+- **WS reconnect lifecycle is a MARKER, not per-stream errors** (albatross
+  #106): transport resets / idle watchdog / stream end now fan ONE
+  `WS_RECONNECTING_MARKER` ("__ws_reconnecting__") to all subscribers — the
+  manager logs the cause once at warn and replays all subscriptions on the
+  fresh connection. Consumers classify via `is_reconnect_marker()`:
+  reconnect-family → debug/aggregated; genuine per-stream errors still warn.
+  Six-stream same-millisecond error bursts are gone at the source.

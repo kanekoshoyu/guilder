@@ -367,7 +367,7 @@ async fn run_manager(
                 _ = heartbeat.tick() => {
                     if let Err(err) = send_with_limit(&mut ws, HyperliquidWsOutboundMessage::Ping, &send_limiter).await {
                         warn!(error = %err, "WS heartbeat failed, reconnecting");
-                        fanout_error(&subscriptions, "websocket heartbeat failed".to_string());
+                        fanout_error(&subscriptions, WS_RECONNECTING_MARKER.to_string());
                         let _ = ws.close().await;
                         break;
                     }
@@ -379,7 +379,7 @@ async fn run_manager(
                             idle_for_ms = idle_for.as_millis(),
                             "WS idle watchdog triggered, reconnecting"
                         );
-                        fanout_error(&subscriptions, "websocket idle watchdog triggered reconnect".to_string());
+                        fanout_error(&subscriptions, WS_RECONNECTING_MARKER.to_string());
                         let _ = ws.close().await;
                         break;
                     }
@@ -395,13 +395,13 @@ async fn run_manager(
                         }
                         Some(Err(err)) => {
                             warn!(error = %err, "WS recv error, reconnecting");
-                            fanout_error(&subscriptions, err.to_string());
+                            fanout_error(&subscriptions, WS_RECONNECTING_MARKER.to_string());
                             let _ = ws.close().await;
                             break;
                         }
                         None => {
                             warn!("WS stream ended, reconnecting");
-                            fanout_error(&subscriptions, "websocket stream ended".to_string());
+                            fanout_error(&subscriptions, WS_RECONNECTING_MARKER.to_string());
                             let _ = ws.close().await;
                             break;
                         }
@@ -626,6 +626,26 @@ fn fanout_error(
     for managed in subscriptions.values() {
         let _ = managed.sender.send(Err(error.clone()));
     }
+}
+
+/// Marker sent to all subscribers when the manager tears the connection down
+/// for a RECONNECT (transport reset / idle watchdog / stream end). Consumers
+/// MUST treat this as "a reconnect is happening, subscriptions will be
+/// replayed" — NOT a per-stream error; the manager logs the cause once at
+/// warn and the loop replays all subscriptions on the fresh connection.
+/// Mirrors the SHUTDOWN_MARKER pattern in core/src/orderbook/sync.rs.
+pub const WS_RECONNECTING_MARKER: &str = "__ws_reconnecting__";
+
+/// True when an error string is a transport-level reconnect marker rather
+/// than a per-stream failure. Consumers use this to downgrade logging
+/// (debug) vs genuine stream errors (warn).
+pub fn is_reconnect_marker(e: &str) -> bool {
+    e == WS_RECONNECTING_MARKER
+        || e == "websocket connection closed"
+        || e == "websocket stream ended"
+        || e.starts_with("websocket idle watchdog")
+        || e.starts_with("websocket heartbeat failed")
+        || e == "WS recv error: websocket connection closed"
 }
 
 pub(crate) fn managed_stream<T, F>(
