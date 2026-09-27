@@ -122,6 +122,17 @@
   reconnect-family → debug/aggregated; genuine per-stream errors still warn.
   Six-stream same-millisecond error bursts are gone at the source.
 
+## 0.7.3 — 2026-09-27
+
+### Fixed
+
+- **`get_positions` skips positions with null `entryPx`** (albatross #114):
+  HL intermittently returns `entryPx: null` on transient position-book
+  reads; mapping to 0 poisoned the consumer's uPnL accounting AND the
+  reconcile anchor (albatross live: `EquityMismatch` offset exactly the
+  position's entry notional). Positions without a real entry are now
+  skipped — the next read returns them properly. 0.7.3.
+
 ## 0.7.2 — 2026-09-27
 
 ### Added

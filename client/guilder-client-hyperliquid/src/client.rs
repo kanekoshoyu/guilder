@@ -1743,11 +1743,17 @@ impl guilder_abstraction::GetAccountSnapshot for HyperliquidClient {
                 if size.is_zero() {
                     return None;
                 }
+                // entryPx is null on TRANSIENT reads (position book race) —
+                // mapping to 0 poisons downstream uPnL accounting AND the
+                // reconcile anchor (albatross #114 live: anchor −149 per
+                // BERA notional). Skip positions without a real entry.
                 let entry_price = p
                     .entry_px
                     .as_deref()
-                    .and_then(parse_decimal)
-                    .unwrap_or_default();
+                    .and_then(parse_decimal);
+                let Some(entry_price) = entry_price else {
+                    return None;
+                };
                 let side = if size > Decimal::ZERO {
                     OrderSide::Buy
                 } else {
