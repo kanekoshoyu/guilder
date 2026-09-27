@@ -507,6 +507,7 @@ pub(crate) fn map_spot_state(
                 hold,
                 margin_used,
                 maintenance,
+                settled_usd: None,
             })
         })
         .collect()
@@ -528,6 +529,11 @@ pub(crate) fn map_perp_state(
         .and_then(parse_decimal)
         .unwrap_or(Decimal::ZERO);
     let free = equity - margin_used;
+    let settled_usd = state
+        .margin_summary
+        .total_raw_usd
+        .as_deref()
+        .and_then(parse_decimal);
     Ok(guilder_abstraction::AccountBalance {
         token: crate::PERP_LEDGER_TOKEN.to_string(),
         equity,
@@ -537,6 +543,7 @@ pub(crate) fn map_perp_state(
         hold: Decimal::ZERO,
         margin_used: Some(margin_used),
         maintenance: Some(equity - margin_used),
+        settled_usd,
     })
 }
 
@@ -2565,6 +2572,8 @@ mod spot_state_tests {
             rows[1].margin_used.map(|d| d.to_string()),
             Some("5.0".to_string())
         );
+        // 0.7.2: settled cash surface — fixture has no totalRawUsd → None
+        assert_eq!(rows[1].settled_usd, None);
         // Marker token must never collide with a real asset symbol.
         assert!(rows[..rows.len() - 1]
             .iter()
@@ -2584,6 +2593,8 @@ mod spot_state_tests {
         // 0.7.0: the perp ledger row is marked, not "USDC" — spot and futures
         // are separate ledgers and consumers split rows by token.
         assert_eq!(usdc.token, crate::PERP_LEDGER_TOKEN);
+        // 0.7.2: settled_usd carries totalRawUsd (venue settled cash) when present.
+        assert_eq!(usdc.settled_usd.map(|d| d.to_string()), Some("30.0".into()));
         assert_eq!(usdc.equity.to_string(), "30.0"); // accountValue
         assert_eq!(usdc.free.to_string(), "30.0"); // accountValue - marginUsed
         assert_eq!(usdc.usable.to_string(), "30.0");

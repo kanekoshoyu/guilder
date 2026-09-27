@@ -285,7 +285,6 @@ pub struct Withdrawal {
 }
 
 /// per-asset balance from spotClearinghouseState with margin health
-#[derive(Debug, Clone)]
 pub struct AccountBalance {
 	pub token: String,
 	pub equity: Decimal,
@@ -295,7 +294,33 @@ pub struct AccountBalance {
 	pub hold: Decimal,
 	pub margin_used: Option<Decimal>,
 	pub maintenance: Option<Decimal>,
+	pub settled_usd: Option<Decimal>,
 }
+
+/// ECDSA recoverable signature (secp256k1), returned by external signers.
+///
+/// Contains the 64-byte compact signature (r || s) and a recovery ID (0 or 1)
+/// used to derive the signer's public key from the signature.
+#[derive(Debug, Clone)]
+pub struct EcdsaSignature {
+    /// r component, big-endian 32 bytes
+    pub r: [u8; 32],
+    /// s component, big-endian 32 bytes
+    pub s: [u8; 32],
+    /// recovery id (0 or 1)
+    pub v: u8,
+}
+
+/// External signer trait for hardware-backed or custom signing backends.
+#[async_trait]
+pub trait ExternalSigner: Send + Sync {
+    /// Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains).
+    async fn sign_prehash(&self, digest: &[u8; 32]) -> Result<EcdsaSignature, String>;
+
+    /// Get the signer's wallet/chain address (used for authentication).
+    fn signer_address(&self) -> String;
+}
+
 
 /// user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint
 #[derive(Debug, Clone)]
@@ -434,26 +459,3 @@ pub trait ListingEventSource {
 	async fn get_current_universe(&self) -> Result<Vec<SymbolStatus>, String>;
 }
 
-/// ECDSA recoverable signature (secp256k1), returned by external signers.
-///
-/// Contains the 64-byte compact signature (r || s) and a recovery ID (0 or 1)
-/// used to derive the signer's public key from the signature.
-#[derive(Debug, Clone)]
-pub struct EcdsaSignature {
-    /// r component, big-endian 32 bytes
-    pub r: [u8; 32],
-    /// s component, big-endian 32 bytes
-    pub s: [u8; 32],
-    /// recovery id (0 or 1)
-    pub v: u8,
-}
-
-/// External signer trait for hardware-backed or custom signing backends.
-#[async_trait]
-pub trait ExternalSigner: Send + Sync {
-    /// Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains).
-    async fn sign_prehash(&self, digest: &[u8; 32]) -> Result<EcdsaSignature, String>;
-
-    /// Get the signer's wallet/chain address (used for authentication).
-    fn signer_address(&self) -> String;
-}

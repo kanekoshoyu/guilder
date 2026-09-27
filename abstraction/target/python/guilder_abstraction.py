@@ -56,6 +56,21 @@ class AssetClass(Enum):
 	Stablecoin = 2
 	Fiat = 3
 
+class ListingEvent:
+	"""one lifecycle event for one symbol on one venue"""
+	def __init__(self, ticker: str, exchange: str, event: str, event_time: str):
+		self.ticker = ticker
+		self.exchange = exchange
+		self.event = event
+		self.event_time = event_time
+
+class SymbolStatus:
+	"""current tradeable status of one symbol"""
+	def __init__(self, ticker: str, exchange: str, is_delisted: bool):
+		self.ticker = ticker
+		self.exchange = exchange
+		self.is_delisted = is_delisted
+
 class L2Update:
 	"""single L2 orderbook price level update"""
 	def __init__(self, symbol: str, price: str, volume: str, side: Side, sequence: int):
@@ -203,7 +218,7 @@ class Withdrawal:
 
 class AccountBalance:
 	"""per-asset balance from spotClearinghouseState with margin health"""
-	def __init__(self, token: str, equity: str, free: str, safe: Option<Decimal>, usable: str, hold: str, margin_used: Option<Decimal>, maintenance: Option<Decimal>):
+	def __init__(self, token: str, equity: str, free: str, safe: Option<Decimal>, usable: str, hold: str, margin_used: Option<Decimal>, maintenance: Option<Decimal>, settled_usd: Option<Decimal>):
 		self.token = token
 		self.equity = equity
 		self.free = free
@@ -212,6 +227,7 @@ class AccountBalance:
 		self.hold = hold
 		self.margin_used = margin_used
 		self.maintenance = maintenance
+		self.settled_usd = settled_usd
 
 class UserRateLimit:
 	"""user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint"""
@@ -412,29 +428,16 @@ class SubscribeMarketDataOps(ABC):
 		pass
 
 
-class EcdsaSignature:
-	"""ECDSA recoverable signature (secp256k1), returned by external signers."""
-	def __init__(self, r: bytes, s: bytes, v: int):
-		self.r = r
-		self.s = s
-		self.v = v
-
-
-class ExternalSigner(ABC):
-	"""External signer trait for hardware-backed or custom signing backends.
-
-	This trait allows exchange clients to delegate the actual cryptographic signing
-	to an external provider (TPM, Secure Enclave, HSM, etc.) without ever exposing
-	the raw private key. The client computes the digest; the signer signs it.
-	"""
+class ListingEventSource(ABC):
+	"""authoritative token lifecycle events (list/delist) straight from the exchange"""
 	@abstractmethod
-	async def sign_prehash(self, digest: bytes) -> EcdsaSignature:
-		"""Sign a 32-byte pre-computed hash (e.g., EIP-712 digest for EVM chains)."""
+	async def get_listing_events(self) -> Result<Vec<ListingEvent>, String>:
+		"""full listing/delist event stream; exchange is the single source of truth"""
 		pass
 
 	@abstractmethod
-	def signer_address(self) -> str:
-		"""Get the signer's wallet/chain address (used for authentication)."""
+	async def get_current_universe(self) -> Result<Vec<SymbolStatus>, String>:
+		"""tickers tradeable right now (with delist flag where the venue exposes it)"""
 		pass
 
 

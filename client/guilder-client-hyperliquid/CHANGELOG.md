@@ -121,3 +121,17 @@
   fresh connection. Consumers classify via `is_reconnect_marker()`:
   reconnect-family → debug/aggregated; genuine per-stream errors still warn.
   Six-stream same-millisecond error bursts are gone at the source.
+
+## 0.7.2 — 2026-09-27
+
+### Added
+
+- **`AccountBalance.settled_usd: Option<Decimal>`** (albatross #114): perp
+  ledger row carries `marginSummary.totalRawUsd` — the venue's SETTLED cash,
+  excluding unrealized PnL. Spot rows: `None`. Consumers must anchor equity
+  accounting on `settled_usd`, never on `equity` (accountValue includes uPnL;
+  anchoring on it double-counts every mark tick — observed live as
+  reconcile EquityMismatch deltas tracking the position's uPnL).
+  `abstraction` regenerated (0.1.27 local: settled_usd field); client deps
+  now path-pinned to the regenerated abstraction until abstraction 0.1.28
+  publishes.

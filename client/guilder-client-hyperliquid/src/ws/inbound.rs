@@ -395,6 +395,7 @@ impl HyperliquidWsInboundMessage {
                     hold,
                     margin_used: None,
                     maintenance: None,
+                    settled_usd: None,
                 })
             })
             .collect();
