@@ -596,10 +596,10 @@ structs:
     values:
       - name: token
         type: String
-        description: asset symbol (e.g. "USDC")
+        description: asset symbol (e.g. "USDC"); the perp ledger row uses "__PERP__"
       - name: equity
         type: Decimal
-        description: total value (balances.total)
+        description: total value (balances.total); perp row = accountValue (INCLUDES unrealized PnL)
       - name: free
         type: Decimal
         description: equity minus holds (equity - hold)
@@ -618,6 +618,12 @@ structs:
       - name: maintenance
         type: Option<Decimal>
         description: maintenance margin requirement (computed as equity - safe when safe exists)
+      - name: settled_usd
+        type: Option<Decimal>
+        description: >
+          settled cash backing the position ledger, EXCLUDING unrealized PnL —
+          perp row = marginSummary.totalRawUsd; None on spot rows. Consumers
+          must anchor equity accounting on this, never on equity (double count).
 
   - name: UserRateLimit
     description: user's address-level API rate limit budget from Hyperliquid's userRateLimit endpoint
