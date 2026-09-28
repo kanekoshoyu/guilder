@@ -100,6 +100,14 @@ pub struct HyperliquidClient {
     market_ws_manager: HyperliquidWsManager,
     user_ws_managers: Arc<RwLock<HashMap<String, HyperliquidWsManager>>>,
     ws_send_limiter: WsSendRateLimiter,
+    /// Monotonic nonce source (2026-09-28 z4dbg incident): the last nonce this
+    /// client handed out. HL rejects a signed action whose nonce was already
+    /// used (`Invalid nonce: duplicate nonce N`), and the raw wall-clock
+    /// millisecond value repeats whenever two signed actions are built within
+    /// the same millisecond — exactly the emergency close fan-out shape.
+    /// The provider hands out `max(now_ms, last + 1)` under a compare-and-swap
+    /// so concurrent signers can never observe the same nonce twice.
+    last_nonce: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Default for HyperliquidClient {
@@ -132,6 +140,31 @@ impl HyperliquidClient {
             ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
+            last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        }
+    }
+
+    /// Monotonic nonce source (2026-09-28 z4dbg fix): HL rejects a signed
+    /// action whose nonce repeats (`Invalid nonce: duplicate nonce N`), and the
+    /// raw wall-clock millisecond repeats whenever two actions are signed in
+    /// the same millisecond. Returns `max(now_ms, last + 1)` via CAS so
+    /// concurrent signers can never observe the same nonce twice.
+    pub(crate) fn next_nonce(&self) -> u64 {
+        use std::sync::atomic::Ordering;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let mut last = self.last_nonce.load(Ordering::Relaxed);
+        loop {
+            let candidate = now_ms.max(last + 1);
+            match self
+                .last_nonce
+                .compare_exchange(last, candidate, Ordering::AcqRel, Ordering::Relaxed)
+            {
+                Ok(_) => return candidate,
+                Err(observed) => last = observed,
+            }
         }
     }
 
@@ -160,6 +193,7 @@ impl HyperliquidClient {
             ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
+            last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -188,6 +222,7 @@ impl HyperliquidClient {
             ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
+            last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -212,6 +247,7 @@ impl HyperliquidClient {
             ),
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
+            last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -279,10 +315,7 @@ impl HyperliquidClient {
         vault_address: Option<&str>,
     ) -> Result<Value, String> {
         let private_key = self.require_private_key()?;
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let nonce = self.next_nonce();
 
         let (r, s, v) = sign_action(
             private_key,
@@ -1373,10 +1406,7 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
 
         // Sign using the canonical msgpack (matching Python's field order)
         let private_key = self.require_private_key()?;
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let nonce = self.next_nonce();
 
         let (r, s, v) = sign_with_msgpack(
             &action_msgpack,
@@ -2497,6 +2527,69 @@ impl guilder_abstraction::ListingEventSource for HyperliquidClient {
                 is_delisted: a.is_delisted,
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod nonce_tests {
+    use super::*;
+
+    /// Nonce monotonicity (2026-09-28 z4dbg incident): the order lane emits
+    /// signed bursts (emergency close fan-out) where two actions signed in the
+    /// same millisecond produced the SAME raw timestamp nonce and HL rejected
+    /// the loser with `Invalid nonce: duplicate nonce N`. A shared client must
+    /// therefore hand out strictly increasing nonces across threads, even when
+    /// the wall clock does not advance between calls.
+    #[tokio::test]
+    async fn next_nonce_is_strictly_increasing_across_concurrent_calls() {
+        let client = HyperliquidClient::new();
+        let n1 = client.next_nonce();
+        let n2 = client.next_nonce();
+        let n3 = client.next_nonce();
+        assert!(n2 > n1, "nonce must strictly increase: {n1} -> {n2}");
+        assert!(n3 > n2, "nonce must strictly increase: {n2} -> {n3}");
+    }
+
+    /// The nonce must track the wall clock (HL rejects stale nonces far in the
+    /// past) while never reusing or going backwards when the clock stalls
+    /// between two consecutive calls: the floor is last_nonce + 1.
+    #[tokio::test]
+    async fn next_nonce_tracks_clock_but_never_repeats_or_regresses() {
+        let client = HyperliquidClient::new();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let n1 = client.next_nonce();
+        assert!(
+            n1 >= now_ms,
+            "first nonce must track the current time: {n1} < {now_ms}"
+        );
+        let n2 = client.next_nonce();
+        assert!(n2 > n1, "even a stalled clock must yield n > last ({n1})");
+    }
+
+    /// Concurrent signed bursts (the emergency fan-out shape): N threads each
+    /// take one nonce and all N must be distinct AND strictly ordered by
+    /// acquisition — the exact scenario that produced the duplicate.
+    #[tokio::test]
+    async fn concurrent_nonce_take_is_duplicate_free() {
+        let client = Arc::new(HyperliquidClient::new());
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let c = Arc::clone(&client);
+                std::thread::spawn(move || c.next_nonce())
+            })
+            .collect();
+        let mut taken: Vec<u64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        taken.sort();
+        let len = taken.len();
+        taken.dedup();
+        assert_eq!(
+            taken.len(),
+            len,
+            "concurrent takes must never produce a duplicate nonce: {taken:?}"
+        );
     }
 }
 
