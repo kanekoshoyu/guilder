@@ -259,6 +259,15 @@ impl HyperliquidClient {
         self
     }
 
+    /// T4 (2026-09-30): snapshot of the REST (info) weight budget —
+    /// `(remaining, max, window_entries)`. Read-only; does not consume
+    /// budget. Host apps export this as a telemetry gauge so budget
+    /// exhaustion (the ghost-order cause for failed cancels) is a
+    /// queryable trend instead of a surprise.
+    pub async fn rest_budget_snapshot(&self) -> (u32, u32, usize) {
+        self.rest_limiter.budget_snapshot().await
+    }
+
     /// POST to the info endpoint, consuming `weight` from the REST rate-limit budget.
     /// Returns `Err("rate_limited: ...")` immediately if budget is exhausted — no retry.
     /// Callers should handle gracefully (skip cycle, retry later, etc.).

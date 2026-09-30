@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.7 — 2026-09-30
+
+### Added
+
+- **`HyperliquidClient::rest_budget_snapshot()`** + `RestRateLimiter::
+  budget_snapshot()` (albatross telemetry gap T4, 2026-09-30 live-lane
+  investigation): read-only `(remaining, max, window_entries)` snapshot
+  of the IP-based REST weight budget. Host apps export the water level
+  each telemetry minute — budget exhaustion (the ghost-order cause:
+  failed cancels burn openOrders w20 + meta w20) becomes a queryable
+  trend instead of a surprise.
+
 ## 0.7.0 — 2026-09-27
 
 ### Added
