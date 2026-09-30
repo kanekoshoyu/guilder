@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.8 — 2026-09-30
+
+### Fixed
+
+- **Asset-index cache (T1)**: `get_asset_index` serves the `meta` universe
+  from a 10-minute TTL snapshot instead of a fresh w20 POST per order/cancel —
+  the ~72% info-budget exhaustion (submissions AND cancels rate-limited into
+  ghost orders) came from this call path. TTL miss on unknown symbol refetches
+  and still errors.
+
 ## 0.7.7 — 2026-09-30
 
 ### Added
