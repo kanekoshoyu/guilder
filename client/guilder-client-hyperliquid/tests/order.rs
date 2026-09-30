@@ -25,18 +25,20 @@ async fn test_place_and_cancel_limit_order() {
     let _ = client.cancel_all_order().await;
 
     // 1. Check balance for USDC
-    let balances = client
-        .get_balance()
-        .await
-        .expect("get_balance failed");
+    let balances = client.get_balance().await.expect("get_balance failed");
     let usdc = balances.iter().find(|b| b.token == "USDC");
     let usdc = usdc.expect("no USDC balance found in test wallet");
     assert!(
         usdc.free > Decimal::ZERO,
         "no free USDC in test wallet (equity={}, free={}, hold={})",
+        usdc.equity,
+        usdc.free,
+        usdc.hold
+    );
+    println!(
+        "USDC balance: equity={} free={} hold={}",
         usdc.equity, usdc.free, usdc.hold
     );
-    println!("USDC balance: equity={} free={} hold={}", usdc.equity, usdc.free, usdc.hold);
 
     // 2. Check current BTC price
     let price = client
@@ -77,7 +79,10 @@ async fn test_place_and_cancel_limit_order() {
     assert_eq!(order.cloid.as_deref(), Some(cloid.as_str()));
     println!(
         "order placed: oid={} cloid={} price={} qty={}",
-        order.order_id, order.cloid.as_deref().unwrap_or("none"), order.price, order.quantity
+        order.order_id,
+        order.cloid.as_deref().unwrap_or("none"),
+        order.price,
+        order.quantity
     );
 
     // 4. Verify order appears in open orders
@@ -95,11 +100,7 @@ async fn test_place_and_cancel_limit_order() {
 
     // 5. Cancel the order
     let cancelled = client.cancel_order_by_cloid(cloid.clone()).await;
-    assert!(
-        cancelled.is_ok(),
-        "cancel_order failed: {:?}",
-        cancelled
-    );
+    assert!(cancelled.is_ok(), "cancel_order failed: {:?}", cancelled);
     println!("order {} cancelled", order.order_id);
 
     // 6. Verify order is gone

@@ -1,5 +1,5 @@
-use guilder_client_hyperliquid::HyperliquidClient;
 use guilder_abstraction::GetAccountSnapshot;
+use guilder_client_hyperliquid::HyperliquidClient;
 
 #[tokio::main]
 async fn main() {
