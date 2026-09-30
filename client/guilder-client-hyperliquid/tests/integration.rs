@@ -19,7 +19,11 @@ async fn test_subscribe_l2_snapshot_receives_events() {
 
     assert_eq!(event.symbol, "BTC");
     assert!(!event.bids.is_empty() || !event.asks.is_empty());
-    assert!(event.bids.first().map(|level| level.price > Decimal::ZERO).unwrap_or(true));
+    assert!(event
+        .bids
+        .first()
+        .map(|level| level.price > Decimal::ZERO)
+        .unwrap_or(true));
 }
 
 /// Subscribes to BTC trade fills and asserts at least one event arrives within 30 s.

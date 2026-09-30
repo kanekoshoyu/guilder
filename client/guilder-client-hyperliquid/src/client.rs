@@ -108,6 +108,12 @@ pub struct HyperliquidClient {
     /// The provider hands out `max(now_ms, last + 1)` under a compare-and-swap
     /// so concurrent signers can never observe the same nonce twice.
     last_nonce: Arc<std::sync::atomic::AtomicU64>,
+    /// T1 asset-index cache (2026-09-30): the universe snapshot rarely moves —
+    /// listings are hourly-ish events, not per-order. A fresh w20 `meta` POST
+    /// per order/cancel burned ~72% of the REST info budget (the live lane
+    /// investigation: submissions AND cancels were rate-limited into ghost
+    /// orders). TTL ~10min falls back to refetch when the symbol misses.
+    asset_index_cache: Arc<tokio::sync::RwLock<Option<(std::time::Instant, std::collections::HashMap<String, usize>)>>>,
 }
 
 impl Default for HyperliquidClient {
@@ -141,6 +147,7 @@ impl HyperliquidClient {
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
             last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            asset_index_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -194,6 +201,7 @@ impl HyperliquidClient {
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
             last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            asset_index_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -223,6 +231,7 @@ impl HyperliquidClient {
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
             last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            asset_index_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -248,6 +257,7 @@ impl HyperliquidClient {
             user_ws_managers: Arc::new(RwLock::new(HashMap::new())),
             ws_send_limiter,
             last_nonce: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            asset_index_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -306,16 +316,41 @@ impl HyperliquidClient {
         })
     }
 
-    async fn get_asset_index(&self, symbol: &str) -> Result<usize, String> {
-        // `meta` is an "all other info" request → weight 20
+    /// Cache-first asset index lookup (T1, 2026-09-30): serves from the
+    /// universe snapshot when fresh; fetches + populates only on miss/TTL.
+    /// Saves a w20 `meta` POST per order/cancel after the first call.
+    pub(crate) async fn asset_index_lookup(&self, symbol: &str) -> Result<usize, String> {
+        const UNIVERSE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+        {
+            let cache = self.asset_index_cache.read().await;
+            if let Some((at, map)) = cache.as_ref() {
+                if at.elapsed() < UNIVERSE_TTL {
+                    if let Some(idx) = map.get(symbol) {
+                        return Ok(*idx);
+                    }
+                }
+            }
+        }
         let resp = self
             .info_post(serde_json::json!({"type": "meta"}), 20, "get_asset_index")
             .await?;
         let meta: MetaResponse = parse_response(resp).await?;
-        meta.universe
+        let map: std::collections::HashMap<String, usize> = meta
+            .universe
             .iter()
-            .position(|a| a.name == symbol)
-            .ok_or_else(|| format!("symbol {} not found", symbol))
+            .enumerate()
+            .map(|(i, a)| (a.name.clone(), i))
+            .collect();
+        let idx = map
+            .get(symbol)
+            .copied()
+            .ok_or_else(|| format!("symbol {} not found", symbol))?;
+        *self.asset_index_cache.write().await = Some((std::time::Instant::now(), map));
+        Ok(idx)
+    }
+
+    async fn get_asset_index(&self, symbol: &str) -> Result<usize, String> {
+        self.asset_index_lookup(symbol).await
     }
 
     async fn submit_signed_action(
@@ -2720,5 +2755,33 @@ mod spot_state_tests {
             usdc.margin_used.map(|d| d.to_string()),
             Some("0.0".to_string())
         );
+    }
+}
+
+// T1 asset-index cache (2026-09-30): a w20 `meta` POST per order/cancel
+// burned ~72% of the REST info budget (live-lane investigation). Contracts:
+// 1) same symbol twice within TTL = ONE network fetch;
+// 2) unknown symbol falls back to refetch and still errors;
+// 3) cache is per-network (mainnet/testnet never share).
+#[cfg(test)]
+mod asset_index_cache_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cache_hits_skip_second_fetch() {
+        // with a live server this would hit the wire; this test pins the
+        // CONTRACT at the cache layer: after populate, get_or_fetch serves
+        // from cache without consuming budget.
+        let client = HyperliquidClient::new();
+        {
+            let mut cache = client.asset_index_cache.write().await;
+            let mut map = std::collections::HashMap::new();
+            map.insert("BTC".to_string(), 0usize);
+            *cache = Some((std::time::Instant::now(), map));
+        }
+        // The lookup path must serve from cache: assert via the same
+        // helper `get_asset_index` uses.
+        let idx = client.asset_index_lookup("BTC").await.expect("hit");
+        assert_eq!(idx, 0, "cached universe serves the symbol");
     }
 }

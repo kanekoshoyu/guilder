@@ -23,11 +23,16 @@ async fn test_market_order() {
     let _ = client.cancel_all_order().await;
 
     let balances = client.get_balance().await.expect("get_balance failed");
-    let usdc = balances.iter().find(|b| b.token == "USDC")
+    let usdc = balances
+        .iter()
+        .find(|b| b.token == "USDC")
         .expect("no USDC balance");
     println!("USDC: equity={} free={}", usdc.equity, usdc.free);
 
-    let price = client.get_price("BTC".to_string()).await.expect("get_price failed");
+    let price = client
+        .get_price("BTC".to_string())
+        .await
+        .expect("get_price failed");
     println!("BTC price: {}", price);
 
     let slippage = Decimal::from_str("0.05").unwrap();
@@ -36,10 +41,13 @@ async fn test_market_order() {
 
     println!("Placing market buy: price={} qty={}", order_price, volume);
 
-    let cloid = format!("test-mkt-{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis());
+    let cloid = format!(
+        "test-mkt-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
 
     let order = client
         .place_order(

@@ -21,9 +21,16 @@ async fn test_l2_stream_delivers_multiple_events() {
             match item {
                 Ok(event) => {
                     assert_eq!(event.symbol, "BTC");
-                    assert!(!event.bids.is_empty() || !event.asks.is_empty(), "snapshot should not be empty");
                     assert!(
-                        event.bids.first().map(|level| level.price > Decimal::ZERO).unwrap_or(true),
+                        !event.bids.is_empty() || !event.asks.is_empty(),
+                        "snapshot should not be empty"
+                    );
+                    assert!(
+                        event
+                            .bids
+                            .first()
+                            .map(|level| level.price > Decimal::ZERO)
+                            .unwrap_or(true),
                         "bid price should be positive"
                     );
                     ok_count += 1;
