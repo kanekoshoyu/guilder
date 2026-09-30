@@ -115,6 +115,24 @@ impl RestRateLimiter {
             }
         }
     }
+
+    /// T4 (2026-09-30): current snapshot of the sliding window —
+    /// `(remaining_weight, max_weight, used_entries)`. Lets the host
+    /// application export the info-budget water level as a telemetry
+    /// gauge (exhaustion becomes a queryable trend, not a surprise).
+    pub async fn budget_snapshot(&self) -> (u32, u32, usize) {
+        let mut entries = self.entries.lock().await;
+        let now = Instant::now();
+        while let Some(&(t, _)) = entries.front() {
+            if now.duration_since(t) >= WINDOW {
+                entries.pop_front();
+            } else {
+                break;
+            }
+        }
+        let used: u32 = entries.iter().map(|(_, w)| w).sum();
+        (self.max_weight.saturating_sub(used), self.max_weight, entries.len())
+    }
 }
 
 // ── Address-based limiter ─────────────────────────────────────────────────────
