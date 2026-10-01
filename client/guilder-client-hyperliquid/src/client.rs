@@ -1610,10 +1610,20 @@ impl guilder_abstraction::ManageOrder for HyperliquidClient {
             )
             .await?;
         let orders: Vec<RestOpenOrder> = parse_response(resp).await?;
-        let order = orders
-            .iter()
-            .find(|o| o.cloid.as_ref() == Some(&cloid))
-            .ok_or_else(|| format!("order with cloid {} not found", cloid))?;
+        let order = match orders.iter().find(|o| o.cloid.as_ref() == Some(&cloid)) {
+            Some(order) => order,
+            // Idempotent cancel: "not found" means the order is not resting —
+            // IOC orders that filled or rejected immediately never rest, and
+            // an earlier cancel may already have landed. The desired terminal
+            // state ("order not on the book") already holds, so this is a
+            // no-op success, not an error. Warn-level noise from callers
+            // re-emitting cancels each tick was flooding the error ring
+            // (claim-cloid not-found ×8+ per boot on 2026-10-01).
+            None => {
+                tracing::info!(cloid = %cloid, "cancel_by_cloid: no resting order with this cloid — treating as already-cancelled (idempotent no-op)");
+                return Ok(());
+            }
+        };
 
         // meta → weight 20
         let meta_resp = self
